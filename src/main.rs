@@ -40,15 +40,11 @@ enum Commands {
         #[arg(value_name = "HASH")]
         hash: String,
     },
-    /// Perform semantic AST diff between commits or workspace
+    /// Perform semantic AST diff between commits, workspace, or files
     Diff {
-        #[arg(value_name = "COMMIT_A")]
-        commit_a: Option<String>,
-        #[arg(value_name = "COMMIT_B")]
-        commit_b: Option<String>,
-        /// Restrict the diff to a specific file (e.g., src/main.rs)
-        #[arg(long, short = 'f')]
-        file: Option<String>,
+        /// Targets: can be 0, 1, or 2 arguments (commits, workspace, or file paths)
+        #[arg(num_args(0..=2), value_name = "TARGET")]
+        targets: Vec<String>,
     },
     Query {
         /// Termo ou padrão de busca (ex: nome do símbolo)
@@ -557,37 +553,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::Diff { commit_a, commit_b, file: target_file } => {
+        Commands::Diff { targets } => {
             if !dir.exists() {
                 println!("Error: Astria repository not initialized.");
                 return Ok(());
             }
 
-            let (files_old, files_new, label_old, label_new) = match (commit_a, commit_b) {
-                (Some(a), Some(b)) => {
-                    let f_a = load_commit_rust_files(&dir, &a)?;
-                    let f_b = load_commit_rust_files(&dir, &b)?;
-                    (f_a, f_b, format!("commit {}", &a[..7]), format!("commit {}", &b[..7]))
-                }
-                (Some(a), None) => {
-                    let f_a = load_commit_rust_files(&dir, &a)?;
-                    let f_ws = load_workspace_rust_files(&current_dir, &dir)?;
-                    (f_a, f_ws, format!("commit {}", &a[..7]), "workspace (HEAD)".to_string())
-                }
-                (None, None) => {
-                    let head_commit = get_head_commit_hash(&dir)?
-                        .ok_or("No HEAD commit found.")?;
+            let (files_old, files_new, label_old, label_new, file_filter) = match targets.len() {
+                0 => {
+                    let head_commit = match get_head_commit_hash(&dir) {
+                        Ok(Some(commit)) => commit,
+                        Ok(None) => {
+                            println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
+                            std::process::exit(0);
+                        },
+                        Err(e) => return Err(e.into()),
+                    };
                     let f_head = load_commit_rust_files(&dir, &head_commit)?;
                     let f_ws = load_workspace_rust_files(&current_dir, &dir)?;
-                    (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string())
+                    (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), None)
                 }
-                (None, Some(b)) => {
-                    let head_commit = get_head_commit_hash(&dir)?
-                        .ok_or("No HEAD commit found.")?;
-                    let f_head = load_commit_rust_files(&dir, &head_commit)?;
-                    let f_b = load_commit_rust_files(&dir, &b)?;
-                    (f_head, f_b, format!("HEAD ({})", &head_commit[..7]), format!("commit {}", &b[..7]))
+                1 => {
+                    let target = &targets[0];
+                    let target_path = current_dir.join(target);
+                    
+                    if target_path.exists() && target_path.is_file() {
+                        // Ex: "ast diff src/main.rs" -> Compara o arquivo atual com o HEAD
+                        let head_commit = match get_head_commit_hash(&dir) {
+                            Ok(Some(commit)) => commit,
+                            Ok(None) => {
+                                println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
+                                std::process::exit(0);
+                            },
+                            Err(e) => return Err(e.into()),
+                        };
+                        let f_head = load_commit_rust_files(&dir, &head_commit)?;
+                        let f_ws = load_workspace_rust_files(&current_dir, &dir)?;
+                        (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), Some(target.clone()))
+                    } else {
+                        // Ex: "ast diff <COMMIT_HASH>" -> Compara o commit informado com o Workspace atual
+                        let f_a = load_commit_rust_files(&dir, target)?;
+                        let f_ws = load_workspace_rust_files(&current_dir, &dir)?;
+                        (f_a, f_ws, format!("commit {}", &target[..7.min(target.len())]), "workspace".to_string(), None)
+                    }
                 }
+                2 => {
+                    let a = &targets[0];
+                    let b = &targets[1];
+                    let f_a = load_commit_rust_files(&dir, a)?;
+                    let f_b = load_commit_rust_files(&dir, b)?;
+                    (f_a, f_b, format!("commit {}", &a[..7.min(a.len())]), format!("commit {}", &b[..7.min(b.len())]), None)
+                }
+                _ => return Err("Too many arguments for diff.".into()),
             };
 
             println!("🔍 AST Semantic Diff: {} ➔ {}\n", label_old, label_new);
@@ -599,7 +616,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut total_changes = 0;
 
             for file in all_files {
-                if let Some(ref target) = target_file {
+                if let Some(ref target) = file_filter {
                     if !file.contains(target) {
                         continue;
                     }
