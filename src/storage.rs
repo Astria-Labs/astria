@@ -78,11 +78,14 @@ pub fn scan_workspace_and_build_tree(
     let mut entries = Vec::new();
     let ignore_patterns = load_ignore_patterns(current_dir);
 
+    let ignore_folders = ["target", "node_modules", ".git", ".astria"];
+
     fn visit_dirs(
         dir: &Path,
         base_dir: &Path,
         main_dir: &Path,
         ignore_patterns: &[String],
+        ignore_folders: &[&str],
         entries: &mut Vec<TreeEntry>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if dir.is_dir() {
@@ -94,6 +97,10 @@ pub fn scan_workspace_and_build_tree(
                 let path = entry.path();
                 let file_name = entry.file_name();
                 let name_str = file_name.to_string_lossy();
+
+                if path.is_dir() && ignore_folders.contains(&name_str.as_ref()) {
+                    continue;
+                }
 
                 let rel_path = path
                     .strip_prefix(base_dir)
@@ -107,7 +114,7 @@ pub fn scan_workspace_and_build_tree(
                 }
 
                 if path.is_dir() {
-                    visit_dirs(&path, base_dir, main_dir, ignore_patterns, entries)?;
+                    visit_dirs(&path, base_dir, main_dir, ignore_patterns, ignore_folders, entries)?;
                 } else if path.is_file() {
                     let content = fs::read(&path)?;
                     let blob = Blob::new(content);
@@ -124,7 +131,7 @@ pub fn scan_workspace_and_build_tree(
         Ok(())
     }
 
-    visit_dirs(current_dir, current_dir, main_dir, &ignore_patterns, &mut entries)?;
+    visit_dirs(current_dir, current_dir, main_dir, &ignore_patterns, &ignore_folders, &mut entries)?;
 
     entries.sort_by(|a, b| a.name.cmp(&b.name));
 
