@@ -27,17 +27,18 @@ Astria is designed from the ground up to combine low-level content-addressable s
 
 ---
 
-## 🚀 Getting Started
-
-### Prerequisites
-
-- [Rust Toolchain](https://www.rust-lang.org/tools/install) (Cargo & rustc)
+## 🚀 Quick Start
 
 ### Installation
 
-Clone the repository and build the binary:
+#### Option 1: Quick Download (Recommended)
+Download the pre-compiled binary directly for your operating system from the [Latest Releases](https://github.com/YOUR_GITHUB_USERNAME/astria/releases):
+
+* **macOS (Apple Silicon / Intel)**
+* **Linux (x86_64)**
+
+Extract the archive and move the `ast` binary to your system PATH:
 
 ```bash
-git clone [https://github.com/YOUR_GITHUB_USERNAME/astria.git](https://github.com/YOUR_GITHUB_USERNAME/astria.git)
-cd astria
-cargo build --release
+tar -xzf ast-macos-arm64.tar.gz
+sudo mv ast /usr/local/bin/
