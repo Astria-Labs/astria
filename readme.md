@@ -32,7 +32,7 @@ Astria is designed from the ground up to combine low-level content-addressable s
 ### Installation
 
 #### Option 1: Quick Download (Recommended)
-Download the pre-compiled binary directly for your operating system from the [Latest Releases](https://github.com/YOUR_GITHUB_USERNAME/astria/releases):
+Download the pre-compiled binary directly for your operating system from the [Latest Releases](https://github.com/Astria-Labs/astria/releases):
 
 * **macOS (Apple Silicon / Intel)**
 * **Linux (x86_64)**
