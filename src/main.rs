@@ -99,7 +99,12 @@ enum Commands {
     /// Unstace changes by removing a file from the staging index
     Reset {
         #[arg(value_name = "PATH")]
-        path: String
+        path: String,
+    },
+    /// Join two development histories together
+    Merge {
+        #[arg(value_name = "BRANCH_OR_COMMIT")]
+        target: String,
     }
 }
 
@@ -226,6 +231,26 @@ fn load_workspace_rust_files(
     }
 
     Ok(files)
+}
+
+/// Helper to collect branches name recursively
+fn collect_branch_names(base_dir: &std::path::Path, current_dir: &std::path::Path, list: &mut Vec<String>) -> std::io::Result<()> {
+    if current_dir.is_dir() {
+        for entry in std::fs::read_dir(current_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                collect_branch_names(base_dir, &path, list)?;
+            } else if path.is_file() {
+                if let Ok(rel) = path.strip_prefix(base_dir) {
+                    if let Some(s) = rel.to_str() {
+                        list.push(s.replace('\\', "/"));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -711,13 +736,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             match name {
                 Some(branch_name) => {
-                    let head_commit = get_head_commit_hash(&dir)?
-                        .ok_or("Cannot create branch: No HEAD commit found.")?;
-                    
-                    std::fs::create_dir_all(&heads_dir)?;
+                    let head_commit = get_head_commit_hash(&dir)?.unwrap_or_default();
                     let branch_path = heads_dir.join(&branch_name);
+                    if let Some(parent) = branch_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+
                     std::fs::write(&branch_path, &head_commit)?;
-                    println!("Branch '{}' created at commit {}", branch_name, &head_commit[..7.min(head_commit.len())]);
+                    if head_commit.is_empty() {
+                        println!("Branch '{}' created (empty, no commits yet).", branch_name);
+                    } else {        
+                        println!("Branch '{}' created at commit {}", branch_name, &head_commit[..7.min(head_commit.len())]);
+                    }
                 }
                 None => {
                     let current_head_content = std::fs::read_to_string(dir.join("HEAD"))?.trim().to_string();
@@ -729,13 +759,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     if heads_dir.exists() {
                         println!("Branches:");
-                        for entry in std::fs::read_dir(&heads_dir)? {
-                            let entry = entry?;
-                            let b_name = entry.file_name().to_string_lossy().to_string();
-                            if b_name == current_branch {
-                                println!("* {}", b_name);
+                        let mut branches = Vec::new();
+                        collect_branch_names(&heads_dir, &heads_dir, &mut branches)?;
+
+                        branches.sort();
+
+                        for branch_name in branches {
+                            if branch_name == current_branch {
+                                println!("* {}", branch_name);
                             } else {
-                                println!("  {}", b_name);
+                                println!("  {}", branch_name);
                             }
                         }
                     } else {
@@ -753,7 +786,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let heads_dir = dir.join("refs").join("heads");
             let target_branch_file = heads_dir.join(&name);
 
-            if target_branch_file.exists() {
+            if target_branch_file.is_file() {
                 let head_path = dir.join("HEAD");
                 std::fs::write(&head_path, format!("ref: refs/heads/{}", name))?;
                 println!("Switched to branch '{}'", name);
@@ -768,6 +801,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+
         Commands::Status => {
 
             if !dir.exists() {
@@ -903,6 +937,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 println!("Error: File '{}' is not staged in index.", rel_path);
             }
+        }
+
+        Commands::Merge { target } => {
+            if !dir.exists() {
+                println!("Error: Astria repository not initialized.");
+                return Ok(());
+            }
+
+            // 1. Resolves destination commit (can be a branch name or a hash number)
+            let heads_dir = dir.join("refs").join("heads");
+            let target_branch_file = heads_dir.join(&target);
+            
+            let target_commit_hash = if target_branch_file.exists() {
+                std::fs::read_to_string(&target_branch_file)?.trim().to_string()
+            } else {
+                let commit_path = dir.join("objects").join(&target);
+                if commit_path.exists() {
+                    target.clone()
+                } else {
+                    println!("Error: Branch or commit '{}' not found.", target);
+                    return Ok(());
+                }
+            };
+
+            let current_head_content = std::fs::read_to_string(dir.join("HEAD"))?.trim().to_string();
+            
+            // 2. Check if we're on a branch or HEAD
+            if current_head_content.starts_with("ref: refs/heads/") {
+                let current_branch = current_head_content[16..].trim().to_string();
+                let branch_file = heads_dir.join(&current_branch);
+                
+                // Updates current branch's pointer for destination commmit (Fast-Forward)
+                std::fs::write(&branch_file, &target_commit_hash)?;
+                println!("Updating {}..{}", &get_head_commit_hash(&dir)?.unwrap_or_default()[..7], &target_commit_hash[..7]);
+                println!("Fast-forward merge successful. Branch '{}' now points to {}", current_branch, &target_commit_hash[..7]);
+            } else {
+                // HEAD: only updates the HEAD
+                update_head(&dir, &target_commit_hash)?;
+                println!("Fast-forward merge successful. HEAD is now at {}", &target_commit_hash[..7]);
+            }
+
+            // 3. Optional. Recovers the merged files in the commit for the current workspace
+            let merged_files = load_commit_rust_files(&dir, &target_commit_hash)?;
+            for (file_path, content) in merged_files {
+                let dest_path = current_dir.join(&file_path);
+                if let Some(parent) = dest_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&dest_path, content)?;
+            }
+
+            println!("Workspace successfully synchronized with merged commit.");
+            std::process::exit(0);
         }
     }
 
