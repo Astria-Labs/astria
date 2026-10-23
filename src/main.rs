@@ -46,15 +46,16 @@ enum Commands {
         #[arg(num_args(0..=2), value_name = "TARGET")]
         targets: Vec<String>,
     },
+    /// Performs AI Semantic/Symbol search
     Query {
-        /// Termo ou padrão de busca (ex: nome do símbolo)
+        /// Default search term (eg: symbol name)
         search: Option<String>,
 
         /// Filtrar apenas funções / métodos / subroutines
         #[arg(long, visible_alias = "fn")]
         func: bool,
 
-        /// Filtrar apenas structs, classes ou tipos de dados
+        /// Filter only structs, classes or data types
         #[arg(long)]
         r#struct: bool, // 'r#struct' para escapar palavra reservada do Rust
 
@@ -79,13 +80,15 @@ enum Commands {
         ai: Option<String>,
     },
     /// List or create branches
+    #[command(visible_alias = "br")]
     Branch {
         #[arg(value_name = "BRANCH_NAME")]
         name: Option<String>,
     },
     /// Switch branch or restore context
+    #[command(visible_alias = "co")]
     Checkout {
-        #[arg(value_name = "BRANCH_OR_COMMIT", visible_alias = "co")]
+        #[arg(value_name = "BRANCH_OR_COMMIT")]
         name: String,
     },
     /// Show the current working tree status
