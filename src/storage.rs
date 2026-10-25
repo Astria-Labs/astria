@@ -1,7 +1,12 @@
 use std::fs;
 use std::path::Path;
 use std::borrow::Cow;
-use crate::object::{Blob, TreeObject, TreeEntry};
+
+use crate::objects::{
+    blob::blob::Blob,
+    tree::tree::Tree,
+    tree::tree_entry::TreeEntry
+};
 
 fn load_ignore_patterns(base_dir: &Path) -> Vec<String> {
 
@@ -135,7 +140,7 @@ pub fn scan_workspace_and_build_tree(
 
     entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let tree = TreeObject { entries: entries.clone() };
+    let tree = Tree { entries: entries.clone() };
     let tree_hash = tree.save(main_dir)?;
 
     Ok((tree_hash, entries))

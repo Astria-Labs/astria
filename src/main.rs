@@ -1,19 +1,25 @@
-mod object;
 mod parser;
 mod storage;
 mod vector;
 mod config;
+mod objects;
 mod versioning;
 
-use crate::object::TreeObject;
-use crate::object::Blob;
-use crate::config::Config;
-use crate::versioning::utils;
-use clap::{Parser, Subcommand};
-use object::CommitObject;
-use parser::SemanticParser;
-use storage::init_repository;
+use crate::objects::{
+    astria::astria::Astria,
+    blob::blob::Blob,
+    commit::commit::Commit,
+    tree::tree::Tree,
+    tree::tree_entry::TreeEntry,
+    object_type::ObjectType
+};
+
 use vector::VectorStore;
+use crate::config::Config;
+use parser::SemanticParser;
+use crate::versioning::utils;
+use storage::init_repository;
+use clap::{Parser, Subcommand};
 use std::collections::{HashMap, BTreeSet};
 
 #[derive(Parser)]
@@ -157,7 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Constrói as entradas da árvore a partir do índice
             let mut entries = Vec::new();
             for (path, blob_hash) in index_map {
-                entries.push(object::TreeEntry {
+                entries.push(TreeEntry {
                     mode: 0o100644,
                     name: path,
                     object_hash: blob_hash,
@@ -167,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Garante ordenação determinística
             entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-            let tree = TreeObject { entries: entries.clone() };
+            let tree = Tree { entries: entries.clone() };
             let tree_hash = tree.save(&dir)?;
 
             println!("Root Tree created from index with {} files. Hash: {}", entries.len(), tree_hash);
@@ -196,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let commit = CommitObject::new(
+            let commit = Commit::new(
                 tree_hash,
                 parent_hash,
                 message,
@@ -340,8 +346,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let compressed_data = std::fs::read(&obj_path)?;
                 let serialized_data = zstd::decode_all(&compressed_data[..])?;
-                let main_object: crate::object::AstriaObject = bincode::deserialize(&serialized_data)?;
-                let commit_obj: CommitObject = bincode::deserialize(&main_object.data)?;
+                let main_object: Astria = bincode::deserialize(&serialized_data)?;
+                let commit_obj: Commit = bincode::deserialize(&main_object.data)?;
 
                 let datetime = chrono::DateTime::from_timestamp(commit_obj.timestamp as i64, 0)
                     .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
@@ -400,11 +406,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let compressed_data = std::fs::read(&target_path)?;
             let serialized_data = zstd::decode_all(&compressed_data[..])?;
-            let main_object: crate::object::AstriaObject = bincode::deserialize(&serialized_data)?;
+            let main_object: Astria = bincode::deserialize(&serialized_data)?;
 
             match main_object.obj_type {
-                object::ObjectType::Commit => {
-                    let commit_obj: CommitObject = bincode::deserialize(&main_object.data)?;
+                ObjectType::Commit => {
+                    let commit_obj: Commit = bincode::deserialize(&main_object.data)?;
                     println!("=== COMMIT OBJECT ===");
                     println!("Tree Hash:   {}", commit_obj.tree_hash);
 
@@ -418,15 +424,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Timestamp:   {}", commit_obj.timestamp);
                     println!("Message:     \n    {}", commit_obj.message);
                 }
-                object::ObjectType::Tree => {
-                    let tree_obj: object::TreeObject = bincode::deserialize(&main_object.data)?;
+                ObjectType::Tree => {
+                    let tree_obj: Tree = bincode::deserialize(&main_object.data)?;
                     println!("=== TREE OBJECT ===");
                     println!("Entries ({} files):", tree_obj.entries.len());
                     for entry in tree_obj.entries {
                         println!("  mode: {:o} | hash: {} | path: {}", entry.mode, entry.object_hash, entry.name);
                     }
                 }
-                object::ObjectType::Blob => {
+                ObjectType::Blob => {
                     let raw_content: Vec<u8> = bincode::deserialize(&main_object.data)?;
                     println!("=== BLOB OBJECT ===");
                     if let Ok(text) = String::from_utf8(raw_content.clone()) {

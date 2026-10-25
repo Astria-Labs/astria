@@ -1,7 +1,12 @@
 use std::path::Path;
 use std::collections::HashMap;
 use crate::storage::scan_workspace_and_build_tree;
-use crate::object::{CommitObject, AstriaObject, TreeObject};
+
+use crate::objects::{
+    commit::commit::Commit, 
+    astria::astria::Astria,
+    tree::tree::Tree
+};
 
 /// Helper to resolve HEAD (supports direct commit hashes or symbolic refs like 'ref: refs/heads/main')
 pub fn get_head_commit_hash(dir: &Path) -> std::io::Result<Option<String>> {
@@ -62,8 +67,8 @@ pub fn load_commit_rust_files(
 
     let compressed = std::fs::read(&commit_path)?;
     let serialized = zstd::decode_all(&compressed[..])?;
-    let main_object: AstriaObject = bincode::deserialize(&serialized)?;
-    let commit_obj: CommitObject = bincode::deserialize(&main_object.data)?;
+    let main_object: Astria = bincode::deserialize(&serialized)?;
+    let commit_obj: Commit = bincode::deserialize(&main_object.data)?;
 
     let tree_path = dir.join("objects").join(&commit_obj.tree_hash);
     if !tree_path.exists() {
@@ -76,12 +81,12 @@ pub fn load_commit_rust_files(
         Err(_) => return Ok(files),
     };
     
-    let tree_main_object: AstriaObject = match bincode::deserialize(&tree_serialized) {
+    let tree_main_object: Astria = match bincode::deserialize(&tree_serialized) {
         Ok(v) => v,
         Err(_) => return Ok(files),
     };
 
-    let tree_obj: TreeObject = match bincode::deserialize(&tree_main_object.data) {
+    let tree_obj: Tree = match bincode::deserialize(&tree_main_object.data) {
         Ok(t) => t,
         Err(_) => return Ok(files),
     };
@@ -92,7 +97,7 @@ pub fn load_commit_rust_files(
             if blob_path.exists() {
                 if let Ok(blob_compressed) = std::fs::read(&blob_path) {
                     if let Ok(blob_serialized) = zstd::decode_all(&blob_compressed[..]) {
-                        if let Ok(blob_main_object) = bincode::deserialize::<AstriaObject>(&blob_serialized) {
+                        if let Ok(blob_main_object) = bincode::deserialize::<Astria>(&blob_serialized) {
                             if let Ok(raw_bytes) = bincode::deserialize::<Vec<u8>>(&blob_main_object.data) {
                                 if let Ok(text) = String::from_utf8(raw_bytes) {
                                     files.insert(entry.name, text);
