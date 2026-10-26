@@ -52,6 +52,7 @@ pub fn init_repository(current_dir: &Path) -> Result<(), Box<dyn std::error::Err
     let dir = current_dir.join(&cfg.config_folder);
     let objects_dir = dir.join("objects");
     let vectors_dir = dir.join("vectors");
+    let config_path = dir.join("config");
     let head_path = dir.join("HEAD");
 
     if dir.exists() {
@@ -70,6 +71,11 @@ pub fn init_repository(current_dir: &Path) -> Result<(), Box<dyn std::error::Err
 
     if !head_path.exists() {
         fs::write(&head_path, "ref: refs/heads/main")?;
+    }
+
+    if !config_path.exists() {
+        let default_config = "[user]\n\tname = \n\temail = \n";
+        fs::write(&config_path, default_config)?;
     }
 
     println!("Initialized empty Astria repository in {}", dir.display());

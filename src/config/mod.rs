@@ -1,3 +1,5 @@
+pub mod user;
+
 use std::sync::OnceLock;
 
 pub struct Config {

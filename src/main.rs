@@ -15,7 +15,7 @@ use crate::objects::{
 };
 
 use vector::VectorStore;
-use crate::config::Config;
+use crate::config::{Config, user::User};
 use parser::SemanticParser;
 use crate::versioning::utils;
 use storage::init_repository;
@@ -115,7 +115,16 @@ enum Commands {
     Merge {
         #[arg(value_name = "BRANCH_OR_COMMIT")]
         target: String,
-    }
+    },
+
+    /// Configure user options (eg; name and email)
+    Config {
+        #[arg(long)]
+        global: bool,
+
+        #[arg(num_args = 1..=2)]
+        args: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -202,11 +211,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
+            let author = User::get_user(&dir);
             let commit = Commit::new(
                 tree_hash,
                 parent_hash,
                 message,
-                "Tiago Perrelli <dev@Astria.org>".to_string(),
+                author,
             );
             let commit_main_object = commit.to_astria_object();
             let commit_hash = commit_main_object.save(&dir)?;
@@ -855,6 +865,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("Workspace successfully synchronized with merged commit.");
             std::process::exit(0);
+        }
+
+        Commands::Config { global, args } => {
+            if args.len() >= 2 {
+                let key = &args[0];
+                let raw = args[1..].join(" ");
+                let value = raw.trim_matches('"').trim_matches('\'');
+
+                match User::set(global, key, value) {
+                    Ok(_) => println!("Your global configurations have been set."),
+                    Err(e) => eprintln!("Failed to set: {}", e),
+                }
+                
+            } else {
+                println!("Usage: ast config [--global] user.name \"Your nane\"");
+                println!("       ast config [--global] user.email \"your@email.com\"");
+            }
         }
     }
 
