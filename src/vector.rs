@@ -28,7 +28,7 @@ impl VectorStore {
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let db = lancedb::connect(db_path).execute().await?;
 
-        // Inicializa o modelo local de embeddings
+        // Initializes the embeddings local model
         let model = TextEmbedding::try_new(
             InitOptions::new(EmbeddingModel::AllMiniLML6V2)
                 .with_show_download_progress(true)

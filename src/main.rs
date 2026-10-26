@@ -206,9 +206,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let indexer: Box<dyn vector::SemanticIndexer> = Box::new(
                     VectorStore::new(db_path).await?
                 );
-                if let Err(e) = indexer.store_chunks(&all_chunks).await {
-                    eprintln!("⚠️ Warning: Failed to update semantic index: {}", e);
+                match indexer.store_chunks(&all_chunks).await {
+                    Ok(_) => println!("✅ Índice semântico atualizado com sucesso ({} chunks processados).", all_chunks.len()),
+                    Err(e) => eprintln!("❌ Erro crítico ao atualizar o índice semântico: {}", e),
                 }
+            } else {
+                println!("ℹ️ Nenhum arquivo .rs elegível encontrado para indexação vetorial.");
             }
 
             let author = User::get_user(&dir);

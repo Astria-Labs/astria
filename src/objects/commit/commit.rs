@@ -17,9 +17,14 @@ impl Commit {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
+
+        let clean_parent = parent_hash
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
+
         Self {
             tree_hash,
-            parent_hash,
+            parent_hash: clean_parent,
             message,
             author,
             timestamp,
