@@ -17,6 +17,7 @@ dependencies = [
  "futures",
  "lancedb",
  "serde",
+ "serde_json",
  "tokio",
  "tree-sitter",
  "tree-sitter-rust",
