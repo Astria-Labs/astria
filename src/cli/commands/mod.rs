@@ -10,6 +10,7 @@ pub mod reset;
 pub mod branch;
 pub mod status;
 pub mod commit;
+pub mod remote;
 pub mod worker;
 pub mod checkout;
 
@@ -26,8 +27,9 @@ use branch::BranchCommand;
 use status::StatusCommand;
 use commit::CommitCommand;
 use worker::WorkerCommand;
+use remote::RemoteCommand;
 use checkout::CheckoutCommand;
-use crate::cli::args::Commands;
+use crate::cli::args::{Commands, RemoteCommands};
 
 pub async fn execute(command: Commands) -> std::io::Result<()> {
     match command {
@@ -47,6 +49,15 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
         Commands::Query { 
             search ,func, r#struct, interface, pub_only, file, commit, ai
         } => QueryCommand::execute(search, func, r#struct, interface, pub_only, file, commit, ai).await,
+        
+        // Remote commands
+        Commands::Remote(remote_cmd) => match remote_cmd {
+            RemoteCommands::Add { name, url } => RemoteCommand::add(name, url),
+            RemoteCommands::SetUrl { name, url } => RemoteCommand::set_url(name, url),
+            RemoteCommands::List => RemoteCommand::list(),
+            RemoteCommands::Remove { name } => RemoteCommand::remove(name),
+        },
+
         #[allow(unreachable_patterns)]
         _ => {
             println!("Command not implemented yet.");

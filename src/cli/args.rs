@@ -106,4 +106,28 @@ pub enum Commands {
     },
 
     Worker,
+
+    /// Manage set of tracked repositories (remotes)
+    #[command(subcommand)]
+    Remote(RemoteCommands),
+}
+
+#[derive(Subcommand)]
+pub enum RemoteCommands {
+    Add {
+        name: String,
+        url: String,
+    },
+    SetUrl {
+        name: String,
+        url: String,
+    },
+    /// List configured remotes
+    #[command(visible_alias = "ls")]
+    List,
+    /// Remove a tracked remote repository
+    #[command(visible_alias = "rm")]
+    Remove {
+        name: String,
+    },
 }
