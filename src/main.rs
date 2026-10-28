@@ -3,13 +3,13 @@ mod storage;
 mod vector;
 mod config;
 mod objects;
-mod versioning;
 mod worker;
 mod queue;
+mod utils;
 
 use crate::objects::{
     astria::astria::Astria,
-    blob::blob::Blob,
+    
     commit::commit::Commit,
     tree::tree::Tree,
     tree::tree_entry::TreeEntry,
@@ -19,12 +19,16 @@ use crate::objects::{
 use vector::VectorStore;
 use crate::config::{Config, user::User};
 use parser::SemanticParser;
-use crate::versioning::utils;
 use storage::init_repository;
 use clap::{Parser, Subcommand};
 use queue::TaskQueue;
 use worker::BackgroundWorker;
 use std::collections::{HashMap, BTreeSet};
+
+use rayon::prelude::*;
+
+use utils::file::FileUtils;
+use utils::commit::CommitUtils;
 
 #[derive(Parser)]
 #[command(name = "ast")]
@@ -107,8 +111,8 @@ enum Commands {
     Status,
     /// Add file contents to the staging area
     Add {
-        #[arg(value_name = "PATH")]
-        path: String,
+        #[arg(required = true)]
+        paths: Vec<String>,
     },
     /// Unstace changes by removing a file from the staging index
     Reset {
@@ -173,7 +177,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let parent_hash = utils::get_head_commit_hash(&dir)?;
+            let parent_hash = CommitUtils::get_head_commit_hash(&dir)?;
 
             // Builds tree entrances from index
             let mut entries = Vec::new();
@@ -201,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let commit_main_object = commit.to_astria_object();
             let commit_hash = commit_main_object.save(&dir)?;
 
-            utils::update_head(&dir, &commit_hash)?;
+            CommitUtils::update_head(&dir, &commit_hash)?;
 
             if let Err(_e) = TaskQueue::push(&dir, &commit_hash, &tree_hash) {
                 eprintln!("⚠️ Warning: Commit has been created, but failed to be queued.")
@@ -241,11 +245,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let files = match commit {
                 Some(ref commit_hash) => {
                     println!("🔎 Querying AST on commit {}...", &commit_hash[..7.min(commit_hash.len())]);
-                    utils::load_commit_rust_files(&dir, commit_hash)?
+                    CommitUtils::load_commit_rust_files(&dir, commit_hash)?
                 }
                 None => {
                     println!("🔎 Querying AST on workspace...");
-                    utils::load_workspace_rust_files(&current_dir, &dir)?
+                    CommitUtils::load_workspace_rust_files(&current_dir, &dir)?
                 }
             };
 
@@ -318,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let current_commit_opt = utils::get_head_commit_hash(&dir)?;
+            let current_commit_opt = CommitUtils::get_head_commit_hash(&dir)?;
             let mut current_commit_hash = match current_commit_opt {
                 Some(h) => h,
                 None => {
@@ -446,7 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let (files_old, files_new, label_old, label_new, file_filter) = match targets.len() {
                 0 => {
-                    let head_commit = match utils::get_head_commit_hash(&dir) {
+                    let head_commit = match CommitUtils::get_head_commit_hash(&dir) {
                         Ok(Some(commit)) => commit,
                         Ok(None) => {
                             println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
@@ -454,8 +458,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         },
                         Err(e) => return Err(e.into()),
                     };
-                    let f_head = utils::load_commit_rust_files(&dir, &head_commit)?;
-                    let f_ws = utils::load_workspace_rust_files(&current_dir, &dir)?;
+                    let f_head = CommitUtils::load_commit_rust_files(&dir, &head_commit)?;
+                    let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)?;
                     (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), None)
                 }
                 1 => {
@@ -464,7 +468,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     
                     if target_path.exists() && target_path.is_file() {
                         // Ex: "ast diff src/main.rs" -> Compara o arquivo atual com o HEAD
-                        let head_commit = match utils::get_head_commit_hash(&dir) {
+                        let head_commit = match CommitUtils::get_head_commit_hash(&dir) {
                             Ok(Some(commit)) => commit,
                             Ok(None) => {
                                 println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
@@ -472,21 +476,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             },
                             Err(e) => return Err(e.into()),
                         };
-                        let f_head = utils::load_commit_rust_files(&dir, &head_commit)?;
-                        let f_ws = utils::load_workspace_rust_files(&current_dir, &dir)?;
+                        let f_head = CommitUtils::load_commit_rust_files(&dir, &head_commit)?;
+                        let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)?;
                         (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), Some(target.clone()))
                     } else {
                         // Ex: "ast diff <COMMIT_HASH>" -> Compara o commit informado com o Workspace atual
-                        let f_a = utils::load_commit_rust_files(&dir, target)?;
-                        let f_ws = utils::load_workspace_rust_files(&current_dir, &dir)?;
+                        let f_a = CommitUtils::load_commit_rust_files(&dir, target)?;
+                        let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)?;
                         (f_a, f_ws, format!("commit {}", &target[..7.min(target.len())]), "workspace".to_string(), None)
                     }
                 }
                 2 => {
                     let a = &targets[0];
                     let b = &targets[1];
-                    let f_a = utils::load_commit_rust_files(&dir, a)?;
-                    let f_b = utils::load_commit_rust_files(&dir, b)?;
+                    let f_a = CommitUtils::load_commit_rust_files(&dir, a)?;
+                    let f_b = CommitUtils::load_commit_rust_files(&dir, b)?;
                     (f_a, f_b, format!("commit {}", &a[..7.min(a.len())]), format!("commit {}", &b[..7.min(b.len())]), None)
                 }
                 _ => return Err("Too many arguments for diff.".into()),
@@ -596,7 +600,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             match name {
                 Some(branch_name) => {
-                    let head_commit = utils::get_head_commit_hash(&dir)?.unwrap_or_default();
+                    let head_commit = CommitUtils::get_head_commit_hash(&dir)?.unwrap_or_default();
                     let branch_path = heads_dir.join(&branch_name);
                     if let Some(parent) = branch_path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -620,7 +624,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if heads_dir.exists() {
                         println!("Branches:");
                         let mut branches = Vec::new();
-                        utils::collect_branch_names(&heads_dir, &heads_dir, &mut branches)?;
+                        CommitUtils::collect_branch_names(&heads_dir, &heads_dir, &mut branches)?;
 
                         branches.sort();
 
@@ -676,9 +680,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("HEAD detached at {}", &head_content[7.min(head_content.len())..]);
             }
 
-            let head_commit_opt = utils::get_head_commit_hash(&dir)?;
+            let head_commit_opt = CommitUtils::get_head_commit_hash(&dir)?;
             let committed_files = if let Some(ref head_commit) = head_commit_opt {
-                utils::load_commit_rust_files(&dir, head_commit)?
+                CommitUtils::load_commit_rust_files(&dir, head_commit)?
             } else {
                 HashMap::new()
             };
@@ -691,7 +695,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 HashMap::new()
             };
 
-            let workspace_files = utils::load_workspace_rust_files(&current_dir, &dir)?;
+            let workspace_files = CommitUtils::load_workspace_rust_files(&current_dir, &dir)?;
 
             let mut staged = Vec::new();
             let mut modified = Vec::new();
@@ -739,24 +743,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        Commands::Add { path } => {
+        Commands::Add { paths } => {
             if !dir.exists() {
                 println!("Error: Astria repository not initialized.");
                 return Ok(());
             }
 
-            let file_path = current_dir.join(&path);
-            if !file_path.exists() || !file_path.is_file() {
-                println!("Error: File '{}' not found or is not a file.", path);
-                return Ok(());
-            }
+            let project_root = dir.parent().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "Invalid repository root")
+            })?;
 
-            // 1. Lê o conteúdo e cria o Blob no CAS (.Astria/objects/)
-            let content = std::fs::read(&file_path)?;
-            let blob = Blob::new(content);
-            let blob_hash = blob.save(&dir)?;
-
-            // 2. Atualiza o arquivo de índice (.Astria/index)
+            // 1. Carrega o índice existente
             let index_path = dir.join("index");
             let mut index_map: HashMap<String, String> = if index_path.exists() {
                 let data = std::fs::read(&index_path)?;
@@ -765,13 +762,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 HashMap::new()
             };
 
-            let rel_path = path.replace('\\', "/");
-            index_map.insert(rel_path.clone(), blob_hash.clone());
+            let mut files_to_process = Vec::new();
 
-            let serialized_index = bincode::serialize(&index_map)?;
-            std::fs::write(&index_path, serialized_index)?;
+            for path_str in paths {
+                let target_path = if path_str == "." {
+                    project_root.to_path_buf()
+                } else {
+                    project_root.join(&path_str)
+                };
 
-            println!("add '{}' (blob: {})", rel_path, &blob_hash[..7]);
+                if !target_path.exists() {
+                    println!("Error: Path '{}' not found.", path_str);
+                    continue;
+                }
+
+                if target_path.is_dir() {
+                    FileUtils::collect_files_recursively(&target_path, project_root, &mut files_to_process)?;
+                } else if target_path.is_file() {
+                    if let Ok(rel_path) = target_path.strip_prefix(project_root) {
+                        files_to_process.push(rel_path.to_path_buf());
+                    }
+                }
+            }
+
+            let staged_entries: Vec<(String, String)> = files_to_process
+                .par_iter()
+                .filter_map(|file_rel_path| {
+                    let file_abs_path = project_root.join(file_rel_path);
+                    
+                    if !file_abs_path.is_file() {
+                        return None;
+                    }
+
+                    let rel_path_str = file_rel_path.to_string_lossy().replace('\\', "/");
+                    
+                    Some((rel_path_str, "staged".to_string()))
+                })
+                .collect();
+
+            let mut added_count = 0;
+            for (rel_path_str, status) in staged_entries {
+                println!("add '{}'", rel_path_str);
+                index_map.insert(rel_path_str, status);
+                added_count += 1;
+            }
+
+            if added_count > 0 {
+                // 4. Salva o índice atualizado de forma atômica
+                let serialized_index = bincode::serialize(&index_map)?;
+                std::fs::write(&index_path, serialized_index)?;
+                println!("Changes successfully staged.");
+            } else {
+                println!("No valid files added.");
+            }
         }
 
         Commands::Reset { path } => {
@@ -830,16 +873,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 // Updates current branch's pointer for destination commmit (Fast-Forward)
                 std::fs::write(&branch_file, &target_commit_hash)?;
-                println!("Updating {}..{}", &utils::get_head_commit_hash(&dir)?.unwrap_or_default()[..7], &target_commit_hash[..7]);
+                println!("Updating {}..{}", &CommitUtils::get_head_commit_hash(&dir)?.unwrap_or_default()[..7], &target_commit_hash[..7]);
                 println!("Fast-forward merge successful. Branch '{}' now points to {}", current_branch, &target_commit_hash[..7]);
             } else {
                 // HEAD: only updates the HEAD
-                utils::update_head(&dir, &target_commit_hash)?;
+                CommitUtils::update_head(&dir, &target_commit_hash)?;
                 println!("Fast-forward merge successful. HEAD is now at {}", &target_commit_hash[..7]);
             }
 
             // 3. Optional. Recovers the merged files in the commit for the current workspace
-            let merged_files = utils::load_commit_rust_files(&dir, &target_commit_hash)?;
+            let merged_files = CommitUtils::load_commit_rust_files(&dir, &target_commit_hash)?;
             for (file_path, content) in merged_files {
                 let dest_path = current_dir.join(&file_path);
                 if let Some(parent) = dest_path.parent() {

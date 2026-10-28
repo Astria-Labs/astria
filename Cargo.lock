@@ -16,6 +16,7 @@ dependencies = [
  "fastembed",
  "futures",
  "lancedb",
+ "rayon",
  "serde",
  "serde_json",
  "tokio",
