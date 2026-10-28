@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::Path;
+use std::process::Stdio;
+use std::process::Command;
 use crate::queue::TaskQueue;
 use crate::parser::SemanticParser;
 use crate::vector::{VectorStore, SemanticIndexer};
@@ -16,44 +18,86 @@ impl BackgroundWorker {
             return Ok(());
         }
 
-        println!("👷 Astria Background Worker iniciado. Monitorando fila de tarefas...");
+        let lock_file = repo_dir.join("worker.lock");
+
+        if lock_file.exists() {
+            if let Ok(pid_str) = fs::read_to_string(&lock_file) {
+                if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    let is_running = if cfg!(target_os = "windows") {
+                        Self::kill_windows_process(&pid)
+                    } else {
+                        Self::kill_unix_process(&pid)
+                    };
+
+                    if is_running {
+                        return Ok(());
+                    } else {
+                        let _ = fs::remove_file(&lock_file);
+                    }
+                } else {
+                    let _ = fs::remove_file(&lock_file);
+                }
+            } else {
+                let _ = fs::remove_file(&lock_file);
+            }
+        }
+
+        if let Err(_) = fs::write(&lock_file, std::process::id().to_string()) {
+            return Ok(());
+        }
+
+        struct LockGuard(std::path::PathBuf);
+        impl Drop for LockGuard {
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+        let _guard = LockGuard(lock_file);
+
+        println!("👷 Astria Background Worker started.");
 
         let repo_path = repo_dir.to_path_buf();
 
-        // Roda em uma thread nativa do SO, totalmente isolada de qualquer contexto CLI/Tokio pré-existente
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Runtime::new() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    eprintln!("❌ Falha fatal ao iniciar runtime do Worker: {}", e);
+                    eprintln!("❌ Fatal failure to start Worker runtime: {}", e);
                     return;
                 }
             };
+
+            let idle_limit = std::time::Duration::from_secs(30);
+            let mut last_activity = std::time::Instant::now();
 
             rt.block_on(async {
                 loop {
                     match TaskQueue::pop(&repo_path) {
                         Ok(Some((task_path, task))) => {
+                            last_activity = std::time::Instant::now();
                             println!("⚙️ Processing semantic for commit: {}", &task.commit_hash[..7]);
-                            
                             let result = Self::process_commit_semantics(&repo_path, &task.tree_hash).await;
 
                             match result {
                                 Ok(count) => {
-                                    println!("✨ Concluído: {} chunks indexados para o commit {}", count, &task.commit_hash[..7]);
+                                    println!("✨ Finished: {} chunks indexed for commit {}", count, &task.commit_hash[..7]);
                                     let _ = fs::remove_file(task_path);
                                 }
                                 Err(e) => {
-                                    eprintln!("❌ Erro ao processar semântica do commit {}: {}", &task.commit_hash[..7], e);
+                                    eprintln!("❌ Failed to process commit semantics {}: {}", &task.commit_hash[..7], e);
                                     let _ = fs::remove_file(task_path);
                                 }
                             }
                         }
                         Ok(None) => {
+                            if last_activity.elapsed() > idle_limit {
+                                println!("💤 Worker will terminated due to inactivity...");
+                                break;
+                            }
                             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                         Err(e) => {
-                            eprintln!("⚠️ Erro ao ler a fila de tarefas: {}", e);
+                            eprintln!("⚠️ Failed to read queue tasks: {}", e);
                             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                         }
                     }
@@ -102,5 +146,44 @@ impl BackgroundWorker {
         }
 
         Ok(all_chunks.len())
+    }
+
+    pub fn spawn(repo_dir: &Path) {
+        let lock_file = repo_dir.join("worker.lock");
+
+        if lock_file.exists() {
+            return; 
+        }
+
+        if let Ok(exe_path) = std::env::current_exe() {
+            let _ = Command::new(exe_path)
+                .arg("worker")
+                .arg("--daemon")
+                .current_dir(repo_dir.parent().unwrap_or(repo_dir))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
+    }
+
+    fn kill_windows_process(pid: &u32) -> bool {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid)])
+            .output()
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout.contains(&pid.to_string())
+            })
+            .unwrap_or(false)
+
+    }
+
+    fn kill_unix_process(pid: &u32) -> bool {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
     }
 }

@@ -175,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let parent_hash = utils::get_head_commit_hash(&dir)?;
 
-            // Constrói as entradas da árvore a partir do índice
+            // Builds tree entrances from index
             let mut entries = Vec::new();
             for (path, blob_hash) in index_map {
                 entries.push(TreeEntry {
@@ -191,35 +191,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let tree = Tree { entries: entries.clone() };
             let tree_hash = tree.save(&dir)?;
 
-            // println!("Root Tree created from index with {} files. Hash: {}", entries.len(), tree_hash);
-
-            // AST Semantic Indexing (opcional para os arquivos estagiados)
-            // let mut parser = SemanticParser::new();
-            // let mut all_chunks = Vec::new();
-
-            // for entry in &entries {
-            //     if entry.name.ends_with(".rs") {
-            //         let file_path = current_dir.join(&entry.name);
-            //         if let Ok(content) = std::fs::read_to_string(file_path) {
-            //             let chunks = parser.parse_rust_code(&content, &entry.name);
-            //             all_chunks.extend(chunks);
-            //         }
-            //     }
-            // }
-
-            // if !all_chunks.is_empty() {
-            //     let db_path = dir.to_str().ok_or("Invalid path string")?;
-            //     let indexer: Box<dyn vector::SemanticIndexer> = Box::new(
-            //         VectorStore::new(db_path).await?
-            //     );
-            //     match indexer.store_chunks(&all_chunks).await {
-            //         Ok(_) => println!("✅ Índice semântico atualizado com sucesso ({} chunks processados).", all_chunks.len()),
-            //         Err(e) => eprintln!("❌ Erro crítico ao atualizar o índice semântico: {}", e),
-            //     }
-            // } else {
-            //     println!("ℹ️ Nenhum arquivo .rs elegível encontrado para indexação vetorial.");
-            // }
-
             let author = User::get_user(&dir);
             let commit = Commit::new(
                 tree_hash.clone(),
@@ -234,6 +205,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             if let Err(_e) = TaskQueue::push(&dir, &commit_hash, &tree_hash) {
                 eprintln!("⚠️ Warning: Commit has been created, but failed to be queued.")
+            } else {
+                BackgroundWorker::spawn(&dir);
             }
 
             let _ = std::fs::remove_file(&index_path);
