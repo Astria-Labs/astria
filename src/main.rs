@@ -9,7 +9,7 @@ mod utils;
 
 use crate::objects::{
     astria::astria::Astria,
-    
+    blob::blob::Blob,
     commit::commit::Commit,
     tree::tree::Tree,
     tree::tree_entry::TreeEntry,
@@ -163,6 +163,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
+            let abs_dir = std::fs::canonicalize(&dir)?;
+            let project_root = abs_dir.parent().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::Other, "Invalid repository root")
+            })?;
+
             let index_path = dir.join("index");
             if !index_path.exists() {
                 println!("No changes added to commit (use 'Astria add <file>').");
@@ -178,15 +183,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let parent_hash = CommitUtils::get_head_commit_hash(&dir)?;
-
-            // Builds tree entrances from index
             let mut entries = Vec::new();
-            for (path, blob_hash) in index_map {
+
+            for (path, status) in &index_map {
+
+                if status != "staged" {
+                    continue;
+                }
+
+                let file_abs_path = project_root.join(&path);
+                if !file_abs_path.is_file() {
+                    continue;
+                }
+
+                let content = match std::fs::read(&file_abs_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        println!("Error reading file from disk: {:?}", e);
+                        continue;
+                    }
+                };
+
+                let blob = Blob::new(content);
+                let blob_hash = match blob.save(&dir) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        println!("Erro to save blob: {:?}", e);
+                        continue;
+                    }
+                };
+
+                println!("Blob created! {}", &blob_hash[..7]);
+
                 entries.push(TreeEntry {
                     mode: 0o100644,
-                    name: path,
+                    name: path.to_string(),
                     object_hash: blob_hash,
                 });
+            }
+
+            if entries.is_empty() {
+                println!("Nothing to commit.");
+                return Ok(());
             }
 
             // Garantee deterministic ordering
@@ -215,7 +253,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let _ = std::fs::remove_file(&index_path);
 
-            println!("\n ⚡ Commit created successfully: {}", commit_hash);
+            println!("\n⚡️ Commit created successfully: {}", commit_hash);
         }
 
         Commands::Query { 
@@ -749,7 +787,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let project_root = dir.parent().ok_or_else(|| {
+            let abs_dir = std::fs::canonicalize(&dir)?;
+            let project_root = abs_dir.parent().ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::Other, "Invalid repository root")
             })?;
 
