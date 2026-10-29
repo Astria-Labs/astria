@@ -1,5 +1,6 @@
 use crate::config;
 use std::collections::HashMap;
+use crate::utils::index::IndexUtils;
 use crate::utils::commit::CommitUtils;
 
 pub struct StatusCommand;
@@ -35,14 +36,7 @@ impl StatusCommand {
             HashMap::new()
         };
 
-        let index_path = dir.join("index");
-        let index_map: HashMap<String, String> = if index_path.exists() {
-            let data = std::fs::read(&index_path)?;
-            bincode::deserialize(&data)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?
-        } else {
-            HashMap::new()
-        };
+        let index_map = IndexUtils::read_index(&dir)?;
 
         let workspace_files = CommitUtils::load_workspace_rust_files(&current_dir, &dir)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;

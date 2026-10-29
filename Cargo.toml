@@ -25,6 +25,13 @@ async-trait = "0.1"
 fastembed = "4"
 rayon = "1.10"
 
+[dev-dependencies]
+tempfile = "3.8"
+
+[lib]
+name = "astria" 
+path = "src/lib.rs"
+
 [[bin]]
 name = "ast"
 path = "src/main.rs"

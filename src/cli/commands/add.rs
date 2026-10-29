@@ -1,6 +1,6 @@
 use crate::config;
-use std::collections::HashMap;
 use crate::utils::file::FileUtils;
+use crate::utils::index::IndexUtils;
 
 pub struct AddCommand;
 
@@ -22,15 +22,7 @@ impl AddCommand {
             std::io::Error::new(std::io::ErrorKind::Other, "Invalid repository root")
         })?;
 
-        // 1. Carrega o índice existente
-        let index_path = dir.join("index");
-        let mut index_map: HashMap<String, String> = if index_path.exists() {
-            let data = std::fs::read(&index_path)?;
-            bincode::deserialize(&data).unwrap_or_default()
-        } else {
-            HashMap::new()
-        };
-
+        let mut index_map = IndexUtils::read_index(&dir)?;
         let mut files_to_process = Vec::new();
 
         for path_str in paths {
@@ -77,11 +69,7 @@ impl AddCommand {
         }
 
         if added_count > 0 {
-            // 4. Salva o índice atualizado de forma atômica
-            let serialized_index = bincode::serialize(&index_map)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
-            std::fs::write(&index_path, serialized_index)?;
+            IndexUtils::write_index(&dir, &index_map)?;
             println!("Changes successfully staged.");
         } else {
             println!("No valid files added.");

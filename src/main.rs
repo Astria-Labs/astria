@@ -1,17 +1,7 @@
-mod parser;
-mod storage;
-mod vector;
-mod config;
-mod objects;
-mod worker;
-mod queue;
-mod utils;
-mod cli;
-pub mod index;
-
+use astria::config;
+use astria::config::{Config};
+use astria::cli::{Cli, commands::execute};
 use clap::Parser;
-use crate::config::{Config};
-use cli::{Cli, commands::execute};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

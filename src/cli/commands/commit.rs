@@ -3,6 +3,7 @@ use crate::config;
 use crate::queue::TaskQueue;
 use std::collections::HashMap;
 use crate::config::user::User;
+use crate::utils::index::IndexUtils;
 use crate::worker::BackgroundWorker;
 use crate::utils::commit::CommitUtils;
 
@@ -128,7 +129,7 @@ impl CommitCommand {
             BackgroundWorker::spawn(&dir);
         }
 
-        let _ = std::fs::remove_file(&index_path);
+        IndexUtils::remove_index(&dir)?;
 
         println!("\n⚡️ Commit created successfully: {}", commit_hash);
         Ok(())
