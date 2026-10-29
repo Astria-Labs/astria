@@ -7,6 +7,7 @@ mod worker;
 mod queue;
 mod utils;
 mod cli;
+pub mod index;
 
 use clap::Parser;
 use crate::config::{Config};

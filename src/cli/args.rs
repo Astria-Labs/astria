@@ -107,6 +107,13 @@ pub enum Commands {
 
     Worker,
 
+    /// Pull remote changes and metadata (lazy fetch)
+    Pull {
+        /// Name of the remote repository (e.g., origin)
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+
     /// Manage set of tracked repositories (remotes)
     #[command(subcommand)]
     Remote(RemoteCommands),

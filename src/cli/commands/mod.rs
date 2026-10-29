@@ -3,6 +3,7 @@ pub mod log;
 pub mod init;
 pub mod show;
 pub mod diff;
+pub mod pull;
 pub mod query;
 pub mod merge;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod checkout;
 
 use add::AddCommand;
 use log::LogCommand;
+use pull::PullCommand;
 use init::InitCommand;
 use show::ShowCommand;
 use diff::DiffCommand;
@@ -49,7 +51,9 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
         Commands::Query { 
             search ,func, r#struct, interface, pub_only, file, commit, ai
         } => QueryCommand::execute(search, func, r#struct, interface, pub_only, file, commit, ai).await,
+
         
+        // Dentro do `execute` principal:
         // Remote commands
         Commands::Remote(remote_cmd) => match remote_cmd {
             RemoteCommands::Add { name, url } => RemoteCommand::add(name, url),
@@ -57,6 +61,8 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
             RemoteCommands::List => RemoteCommand::list(),
             RemoteCommands::Remove { name } => RemoteCommand::remove(name),
         },
+
+        Commands::Pull { remote } => PullCommand::execute(remote),
 
         #[allow(unreachable_patterns)]
         _ => {
