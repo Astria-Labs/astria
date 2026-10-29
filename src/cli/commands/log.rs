@@ -58,8 +58,8 @@ impl LogCommand {
             println!("Date:   {}", datetime);
             println!("\n    {}\n", commit_obj.message);
 
-            if let Some(parent) = commit_obj.parent_hash {
-                current_commit_hash = parent;
+            if let Some(parent) = commit_obj.parents.first() {
+                current_commit_hash = parent.to_string();
                 println!("--------------------------------------------------");
             } else {
                 break;

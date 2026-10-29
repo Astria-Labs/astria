@@ -48,8 +48,15 @@ impl CommitCommand {
             return Ok(());
         }
 
-        let parent_hash = CommitUtils::get_head_commit_hash(&dir)?;
-        let mut entries = Vec::new();
+        let parent_hash_opt = CommitUtils::get_head_commit_hash(&dir)?;
+        let mut parents = Vec::new();
+
+        if let Some(parent_hash) = parent_hash_opt {
+            CommitUtils::validate_object_exists(&dir, &parent_hash)?;
+            parents.push(parent_hash);
+        }
+
+        let mut tree_entries = Vec::new();
 
         for (path, status) in &index_map {
 
@@ -81,29 +88,31 @@ impl CommitCommand {
 
             println!("Blob created! {}", &blob_hash[..7]);
 
-            entries.push(TreeEntry {
+            tree_entries.push(TreeEntry {
                 mode: 0o100644,
                 name: path.to_string(),
                 object_hash: blob_hash,
             });
         }
 
-        if entries.is_empty() {
+        if tree_entries.is_empty() {
             println!("Nothing to commit.");
             return Ok(());
         }
 
         // Garantee deterministic ordering
-        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        tree_entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let tree = Tree { entries: entries.clone() };
+        let tree = Tree { entries: tree_entries.clone() };
         let tree_hash = tree.save(&dir)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+        CommitUtils::validate_object_exists(&dir, &tree_hash)?;
 
         let author = User::get_user(&dir);
         let commit = Commit::new(
             tree_hash.clone(),
-            parent_hash,
+            parents,
             message,
             author,
         );

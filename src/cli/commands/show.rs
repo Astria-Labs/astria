@@ -61,7 +61,7 @@ impl ShowCommand {
                 println!("=== COMMIT OBJECT ===");
                 println!("Tree Hash:   {}", commit_obj.tree_hash);
 
-                if let Some(parent) = &commit_obj.parent_hash {
+                if let Some(parent) = &commit_obj.parents.first() {
                     println!("Parent Hash: {}", parent);
                 } else {
                     println!("Parent Hash: None");

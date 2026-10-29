@@ -156,4 +156,15 @@ impl CommitUtils {
         }
         Ok(())
     }
+
+    pub fn validate_object_exists(dir: &std::path::Path, hash: &str) -> std::io::Result<()> {
+        let obj_path = dir.join("objects").join(hash);
+        if !obj_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Integrity error: Referenced object {} not found in CAS.", hash),
+            ));
+        }
+        Ok(())
+    }
 }
