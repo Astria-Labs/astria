@@ -1,7 +1,15 @@
-use crate::network::protocol::WireMessage;
+use crate::network::protocol::{SemanticMatch, SyncMode, WireMessage};
+use crate::objects::astria::astria::Astria;
+use crate::objects::commit::commit::Commit;
+use crate::objects::object_type::ObjectType;
+use crate::objects::tree::tree::Tree;
 use crate::server::db::ServerAuthDb;
+use crate::vector::VectorStore;
+use crate::virtual_index::is_critical_path;
 use quinn::{Endpoint, ServerConfig};
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
+use std::path::Path;
 
 pub struct AstriaServer {
     bind_addr: SocketAddr,
@@ -60,6 +68,7 @@ impl AstriaServer {
                     client_id: _,
                     auth_token,
                     target_repository,
+                    sync_mode,
                     known_commits,
                 } => {
                     let is_authorized =
@@ -97,23 +106,8 @@ impl AstriaServer {
                     }
 
                     let objects_dir = std::path::Path::new(".astria/objects");
-                    let mut missing_objects: Vec<String> = vec![];
-
-                    let server_objects = if objects_dir.exists() {
-                        std::fs::read_dir(objects_dir)?
-                            .filter_map(|entry| {
-                                entry.ok().and_then(|e| e.file_name().into_string().ok())
-                            })
-                            .collect::<Vec<String>>()
-                    } else {
-                        vec![]
-                    };
-
-                    for obj_hash in server_objects {
-                        if !known_commits.contains(&obj_hash) {
-                            missing_objects.push(obj_hash);
-                        }
-                    }
+                    let missing_objects =
+                        Self::select_missing_objects(objects_dir, &known_commits, sync_mode)?;
 
                     let resp = WireMessage::ServerResponse {
                         success: true,
@@ -125,24 +119,114 @@ impl AstriaServer {
                         .await?;
                     send.write_all(&resp_bytes).await?;
 
-                    for obj_hash in missing_objects {
-                        let obj_path = std::path::Path::new(".astria/objects").join(&obj_hash);
-                        if obj_path.exists() {
-                            let raw_data = std::fs::read(&obj_path)?;
-                            let compressed_data = zstd::encode_all(&raw_data[..], 3)?;
+                    Self::send_objects(&mut send, &missing_objects).await?;
+                    send.finish()?;
+                }
+                WireMessage::RequestObjects {
+                    client_id: _,
+                    auth_token,
+                    target_repository,
+                    hashes,
+                } => {
+                    let is_authorized =
+                        match db.validate_access(&auth_token, &target_repository, "read") {
+                            Ok(valid) => valid,
+                            Err(e) => {
+                                let resp = WireMessage::ServerResponse {
+                                    success: false,
+                                    message: format!(
+                                        "Unauthorized for repository '{}': {}",
+                                        target_repository, e
+                                    ),
+                                    missing_objects: vec![],
+                                };
+                                let resp_bytes = bincode::serialize(&resp)?;
+                                send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                                    .await?;
+                                send.write_all(&resp_bytes).await?;
+                                send.finish()?;
+                                continue;
+                            }
+                        };
 
-                            let obj_msg = WireMessage::SendObject {
-                                hash: obj_hash,
-                                compressed_data,
-                            };
-
-                            let obj_bytes = bincode::serialize(&obj_msg)?;
-                            send.write_all(&(obj_bytes.len() as u64).to_le_bytes())
-                                .await?;
-                            send.write_all(&obj_bytes).await?;
-                        }
+                    if !is_authorized {
+                        let resp = WireMessage::ServerResponse {
+                            success: false,
+                            message: format!("Unauthorized for repository '{}'", target_repository),
+                            missing_objects: vec![],
+                        };
+                        let resp_bytes = bincode::serialize(&resp)?;
+                        send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                            .await?;
+                        send.write_all(&resp_bytes).await?;
+                        send.finish()?;
+                        continue;
                     }
 
+                    let resp = WireMessage::ServerResponse {
+                        success: true,
+                        message: "OK".to_string(),
+                        missing_objects: hashes.clone(),
+                    };
+                    let resp_bytes = bincode::serialize(&resp)?;
+                    send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                        .await?;
+                    send.write_all(&resp_bytes).await?;
+                    Self::send_objects(&mut send, &hashes).await?;
+                    send.finish()?;
+                }
+                WireMessage::SemanticQuery {
+                    client_id: _,
+                    auth_token,
+                    target_repository,
+                    query,
+                    limit,
+                } => {
+                    let is_authorized =
+                        match db.validate_access(&auth_token, &target_repository, "read") {
+                            Ok(valid) => valid,
+                            Err(e) => {
+                                let resp = WireMessage::SemanticQueryResponse {
+                                    success: false,
+                                    message: format!(
+                                        "Unauthorized for repository '{}': {}",
+                                        target_repository, e
+                                    ),
+                                    matches: vec![],
+                                };
+                                let resp_bytes = bincode::serialize(&resp)?;
+                                send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                                    .await?;
+                                send.write_all(&resp_bytes).await?;
+                                send.finish()?;
+                                continue;
+                            }
+                        };
+
+                    if !is_authorized {
+                        let resp = WireMessage::SemanticQueryResponse {
+                            success: false,
+                            message: format!("Unauthorized for repository '{}'", target_repository),
+                            matches: vec![],
+                        };
+                        let resp_bytes = bincode::serialize(&resp)?;
+                        send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                            .await?;
+                        send.write_all(&resp_bytes).await?;
+                        send.finish()?;
+                        continue;
+                    }
+
+                    let matches = Self::semantic_query(&query, limit).await?;
+                    let resp = WireMessage::SemanticQueryResponse {
+                        success: true,
+                        message: "OK".to_string(),
+                        matches,
+                    };
+                    let resp_bytes = bincode::serialize(&resp)?;
+                    send.write_all(&(resp_bytes.len() as u64).to_le_bytes())
+                        .await?;
+                    send.write_all(&resp_bytes).await?;
                     send.finish()?;
                 }
                 WireMessage::ClientPush {
@@ -229,6 +313,166 @@ impl AstriaServer {
                     send.finish()?;
                 }
                 _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    fn select_missing_objects(
+        objects_dir: &Path,
+        known_objects: &[String],
+        sync_mode: SyncMode,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        if !objects_dir.exists() {
+            return Ok(vec![]);
+        }
+
+        let known: HashSet<&str> = known_objects.iter().map(|s| s.as_str()).collect();
+        let mut selected = HashSet::new();
+        let mut critical_blobs = HashSet::new();
+
+        for entry in std::fs::read_dir(objects_dir)? {
+            let entry = entry?;
+            let hash = entry.file_name().to_string_lossy().to_string();
+            if known.contains(hash.as_str()) {
+                continue;
+            }
+
+            match sync_mode {
+                SyncMode::Full => {
+                    selected.insert(hash);
+                }
+                SyncMode::Lazy => {
+                    let Some(object) = Self::read_astria_object(&entry.path())? else {
+                        continue;
+                    };
+                    match object.obj_type {
+                        ObjectType::Commit | ObjectType::Tree => {
+                            if let ObjectType::Tree = object.obj_type {
+                                if let Ok(tree) = bincode::deserialize::<Tree>(&object.data) {
+                                    for tree_entry in tree.entries {
+                                        if is_critical_path(&tree_entry.name) {
+                                            critical_blobs.insert(tree_entry.object_hash);
+                                        }
+                                    }
+                                }
+                            }
+                            selected.insert(hash);
+                        }
+                        ObjectType::Blob => {}
+                    }
+                }
+                SyncMode::OnDemand => {
+                    let Some(object) = Self::read_astria_object(&entry.path())? else {
+                        continue;
+                    };
+                    match object.obj_type {
+                        ObjectType::Commit | ObjectType::Tree => {
+                            selected.insert(hash);
+                        }
+                        ObjectType::Blob => {}
+                    }
+                }
+            }
+        }
+
+        for blob_hash in critical_blobs {
+            if !known.contains(blob_hash.as_str()) {
+                selected.insert(blob_hash);
+            }
+        }
+
+        let mut selected: Vec<String> = selected.into_iter().collect();
+        selected.sort();
+        Ok(selected)
+    }
+
+    async fn semantic_query(
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<SemanticMatch>, Box<dyn std::error::Error>> {
+        let vector_store = VectorStore::new(".astria/vectors").await?;
+        let path_to_blob = Self::build_path_blob_index(Path::new(".astria/objects"))?;
+        let results = vector_store.search_matches(query, limit).await?;
+
+        Ok(results
+            .into_iter()
+            .map(|result| {
+                let blob_hash = path_to_blob.get(&result.file).cloned();
+                SemanticMatch {
+                    file: result.file,
+                    name: result.name,
+                    kind: result.kind,
+                    start_line: result.start_line,
+                    end_line: result.end_line,
+                    distance: result.distance,
+                    blob_hash,
+                }
+            })
+            .collect())
+    }
+
+    fn build_path_blob_index(
+        objects_dir: &Path,
+    ) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+        let mut path_to_blob = HashMap::new();
+        if !objects_dir.exists() {
+            return Ok(path_to_blob);
+        }
+
+        for entry in std::fs::read_dir(objects_dir)? {
+            let entry = entry?;
+            let Some(object) = Self::read_astria_object(&entry.path())? else {
+                continue;
+            };
+
+            if let ObjectType::Commit = object.obj_type {
+                let commit: Commit = bincode::deserialize(&object.data)?;
+                let tree_path = objects_dir.join(commit.tree_hash);
+                let Some(tree_object) = Self::read_astria_object(&tree_path)? else {
+                    continue;
+                };
+                let tree: Tree = bincode::deserialize(&tree_object.data)?;
+
+                for tree_entry in tree.entries {
+                    path_to_blob.insert(tree_entry.name, tree_entry.object_hash);
+                }
+            }
+        }
+
+        Ok(path_to_blob)
+    }
+
+    fn read_astria_object(path: &Path) -> Result<Option<Astria>, Box<dyn std::error::Error>> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let compressed = std::fs::read(path)?;
+        let serialized = zstd::decode_all(&compressed[..])?;
+        let object = bincode::deserialize::<Astria>(&serialized)?;
+        Ok(Some(object))
+    }
+
+    async fn send_objects(
+        send: &mut quinn::SendStream,
+        hashes: &[String],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for obj_hash in hashes {
+            let obj_path = std::path::Path::new(".astria/objects").join(obj_hash);
+            if obj_path.exists() {
+                let raw_data = std::fs::read(&obj_path)?;
+                let compressed_data = zstd::encode_all(&raw_data[..], 3)?;
+
+                let obj_msg = WireMessage::SendObject {
+                    hash: obj_hash.clone(),
+                    compressed_data,
+                };
+
+                let obj_bytes = bincode::serialize(&obj_msg)?;
+                send.write_all(&(obj_bytes.len() as u64).to_le_bytes())
+                    .await?;
+                send.write_all(&obj_bytes).await?;
             }
         }
 

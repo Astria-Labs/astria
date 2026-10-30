@@ -9,6 +9,7 @@ pub struct User;
 pub struct ClientConfig {
     pub user: Option<UserSection>,
     pub remotes: HashMap<String, RemoteSection>,
+    pub checkout: Option<CheckoutSection>,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -23,6 +24,11 @@ pub struct RemoteSection {
     pub url: String,
     pub repository: String,
     pub auth_token: String,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct CheckoutSection {
+    pub mode: Option<String>,
 }
 
 impl User {
@@ -51,6 +57,18 @@ impl User {
                 "name" => user.name = Some(value.to_string()),
                 "email" => user.email = Some(value.to_string()),
                 "token" | "auth_token" => user.token = Some(value.to_string()),
+                _ => {
+                    return Err(Error::new(
+                        ErrorKind::InvalidInput,
+                        format!("Chave desconhecida: {}", key),
+                    ))
+                }
+            }
+        } else if parts.len() == 2 && parts[0] == "checkout" {
+            let key = parts[1];
+            let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
+            match key {
+                "mode" => checkout.mode = Some(value.to_string()),
                 _ => {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
@@ -175,6 +193,7 @@ impl ClientConfig {
         Self {
             user: Some(UserSection::default()),
             remotes,
+            checkout: None,
         }
     }
 
@@ -193,32 +212,7 @@ impl ClientConfig {
         }
 
         let content = fs::read_to_string(config_path)?;
-        let mut config = Self::parse(&content)?;
-        Self::load_legacy_remotes(repo_path, &mut config)?;
-
-        Ok(config)
-    }
-
-    fn load_legacy_remotes(repo_path: &Path, config: &mut Self) -> Result<()> {
-        let cfg = crate::config::get();
-        let remotes_path = repo_path.join(&cfg.config_folder).join("remotes");
-        if !remotes_path.exists() {
-            return Ok(());
-        }
-
-        let data = fs::read(remotes_path)?;
-        let remotes: HashMap<String, String> = bincode::deserialize(&data)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-
-        for (name, url) in remotes {
-            config.remotes.entry(name).or_insert_with(|| RemoteSection {
-                url,
-                repository: String::new(),
-                auth_token: String::new(),
-            });
-        }
-
-        Ok(())
+        Self::parse(&content)
     }
 
     pub fn load_from_path_or_default(path: &Path) -> Result<Self> {
@@ -247,6 +241,7 @@ impl ClientConfig {
             None,
             User,
             Remote(String),
+            Checkout,
         }
 
         let mut config = Self::default();
@@ -262,6 +257,8 @@ impl ClientConfig {
                 let header = &line[1..line.len() - 1];
                 if header == "user" {
                     section = Section::User;
+                } else if header == "checkout" {
+                    section = Section::Checkout;
                 } else if let Some(remote_name) = Self::parse_remote_header(header) {
                     config
                         .remotes
@@ -301,6 +298,12 @@ impl ClientConfig {
                         "repository" => remote.repository = value,
                         "auth_token" | "token" => remote.auth_token = value,
                         _ => {}
+                    }
+                }
+                Section::Checkout => {
+                    let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
+                    if key == "mode" {
+                        checkout.mode = Some(value);
                     }
                 }
                 Section::None => {}
@@ -345,26 +348,12 @@ impl ClientConfig {
             out.push_str(&format!("    token = \"{}\"\n", Self::quote(&token)));
         }
 
-        let mut remote_names: Vec<_> = self.remotes.keys().cloned().collect();
-        remote_names.sort();
-
-        if remote_names.is_empty() {
-            remote_names.push("origin".to_string());
-        }
-
-        for name in remote_names {
-            let remote = self.remotes.get(&name).cloned().unwrap_or_default();
-            out.push('\n');
-            out.push_str(&format!("[remote \"{}\"]\n", Self::quote(&name)));
-            out.push_str(&format!("    url = \"{}\"\n", Self::quote(&remote.url)));
-            out.push_str(&format!(
-                "    repository = \"{}\"\n",
-                Self::quote(&remote.repository)
-            ));
-            out.push_str(&format!(
-                "    auth_token = \"{}\"\n",
-                Self::quote(&remote.auth_token)
-            ));
+        if let Some(checkout) = self.checkout.clone() {
+            if let Some(mode) = checkout.mode.filter(|m| !m.trim().is_empty()) {
+                out.push('\n');
+                out.push_str("[checkout]\n");
+                out.push_str(&format!("    mode = \"{}\"\n", Self::quote(&mode)));
+            }
         }
 
         out.push('\n');
@@ -386,6 +375,21 @@ impl ClientConfig {
             .and_then(|u| u.name.clone())
             .filter(|name| !name.trim().is_empty())
             .unwrap_or_else(|| "cli_user".to_string())
+    }
+
+    pub fn checkout_mode(&self) -> String {
+        self.checkout
+            .as_ref()
+            .and_then(|checkout| checkout.mode.clone())
+            .filter(|mode| !mode.trim().is_empty())
+            .unwrap_or_else(|| "full".to_string())
+    }
+
+    pub fn set_checkout_mode(repo_path: &Path, mode: &str) -> Result<()> {
+        let mut config = Self::load_from_repository(repo_path)?;
+        let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
+        checkout.mode = Some(mode.to_string());
+        config.save_to_repository(repo_path)
     }
 
     /// Valida e extrai o repositório e o token para conexões QUIC.

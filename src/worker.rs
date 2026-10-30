@@ -1,7 +1,8 @@
+use crate::network::client::AstriaClient;
 use crate::objects::astria::astria::Astria;
 use crate::objects::tree::tree::Tree;
 use crate::parser::SemanticParser;
-use crate::queue::TaskQueue;
+use crate::queue::{Task, TaskQueue};
 use crate::vector::{SemanticIndexer, VectorStore};
 use std::fs;
 use std::path::Path;
@@ -68,40 +69,99 @@ impl BackgroundWorker {
 
             let idle_limit = std::time::Duration::from_secs(30);
             let mut last_activity = std::time::Instant::now();
+            let mut active_hydrations: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
             rt.block_on(async {
                 loop {
+                    let mut i = 0;
+                    while i < active_hydrations.len() {
+                        if active_hydrations[i].is_finished() {
+                            let handle = active_hydrations.remove(i);
+                            let _ = handle.await;
+                        } else {
+                            i += 1;
+                        }
+                    }
+
+                    if active_hydrations.len() >= 4 {
+                        let handle = active_hydrations.remove(0);
+                        let _ = handle.await;
+                        continue;
+                    }
+
                     match TaskQueue::pop(&repo_path) {
                         Ok(Some((task_path, task))) => {
                             last_activity = std::time::Instant::now();
-                            println!(
-                                "⚙️ Processing semantic for commit: {}",
-                                &task.commit_hash[..7]
-                            );
-                            let result =
-                                Self::process_commit_semantics(&repo_path, &task.tree_hash).await;
-
-                            match result {
-                                Ok(count) => {
+                            match task {
+                                Task::SemanticIndex {
+                                    commit_hash,
+                                    tree_hash,
+                                } => {
                                     println!(
-                                        "✨ Finished: {} chunks indexed for commit {}",
-                                        count,
-                                        &task.commit_hash[..7]
+                                        "⚙️ Processing semantic for commit: {}",
+                                        &commit_hash[..7.min(commit_hash.len())]
                                     );
-                                    let _ = fs::remove_file(task_path);
+                                    let result =
+                                        Self::process_commit_semantics(&repo_path, &tree_hash)
+                                            .await;
+
+                                    match result {
+                                        Ok(count) => {
+                                            println!(
+                                                "✨ Finished: {} chunks indexed for commit {}",
+                                                count,
+                                                &commit_hash[..7.min(commit_hash.len())]
+                                            );
+                                            let _ = fs::remove_file(task_path);
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "❌ Failed to process commit semantics {}: {}",
+                                                &commit_hash[..7.min(commit_hash.len())],
+                                                e
+                                            );
+                                            let _ = fs::remove_file(task_path);
+                                        }
+                                    }
                                 }
-                                Err(e) => {
-                                    eprintln!(
-                                        "❌ Failed to process commit semantics {}: {}",
-                                        &task.commit_hash[..7],
-                                        e
-                                    );
-                                    let _ = fs::remove_file(task_path);
+                                Task::HydrateBlob {
+                                    remote: _,
+                                    url,
+                                    repository,
+                                    auth_token,
+                                    path,
+                                    hash,
+                                } => {
+                                    let repo_path = repo_path.clone();
+                                    active_hydrations.push(tokio::spawn(async move {
+                                        let result = Self::process_hydrate_blob(
+                                            &repo_path,
+                                            &url,
+                                            &repository,
+                                            &auth_token,
+                                            &path,
+                                            &hash,
+                                        )
+                                        .await;
+                                        match result {
+                                            Ok(_) => {
+                                                println!("⬇️ Hydrated {}", path);
+                                                let _ = fs::remove_file(task_path);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("❌ Failed to hydrate {}: {}", path, e);
+                                                let _ = fs::remove_file(task_path);
+                                            }
+                                        }
+                                    }));
                                 }
                             }
                         }
                         Ok(None) => {
                             if last_activity.elapsed() > idle_limit {
+                                while let Some(handle) = active_hydrations.pop() {
+                                    let _ = handle.await;
+                                }
                                 println!("💤 Worker will terminated due to inactivity...");
                                 break;
                             }
@@ -120,6 +180,31 @@ impl BackgroundWorker {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(60));
         }
+    }
+
+    async fn process_hydrate_blob(
+        repo_dir: &Path,
+        url: &str,
+        repository: &str,
+        auth_token: &str,
+        path: &str,
+        hash: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let repo_path = repo_dir.parent().ok_or("Invalid repository parent path")?;
+        let addr_str = url.trim_start_matches("quic://");
+        let server_addr = addr_str.parse()?;
+        let client = AstriaClient::new(server_addr);
+        client
+            .fetch_objects(
+                repo_path,
+                "worker",
+                auth_token,
+                repository,
+                vec![hash.to_string()],
+            )
+            .await?;
+        AstriaClient::materialize_blob(repo_path, path, hash)?;
+        Ok(())
     }
 
     /// Internal logic that reads a Tree and processes SemanticParser + VectorStore
@@ -152,7 +237,8 @@ impl BackgroundWorker {
         }
 
         if !all_chunks.is_empty() {
-            let db_path = repo_dir.to_str().ok_or("Invalid path string")?;
+            let vectors_dir = repo_dir.join("vectors");
+            let db_path = vectors_dir.to_str().ok_or("Invalid path string")?;
             let indexer: Box<dyn SemanticIndexer> = Box::new(VectorStore::new(db_path).await?);
             indexer.store_chunks(&all_chunks).await?;
         }
@@ -170,7 +256,6 @@ impl BackgroundWorker {
         if let Ok(exe_path) = std::env::current_exe() {
             let _ = Command::new(exe_path)
                 .arg("worker")
-                .arg("--daemon")
                 .current_dir(repo_dir.parent().unwrap_or(repo_dir))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())

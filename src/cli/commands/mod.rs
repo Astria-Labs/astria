@@ -83,7 +83,12 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
 
         Commands::Pull { remote } => PullCommand::execute(remote).await,
         Commands::Push { remote } => PushCommand::execute(remote).await,
-        Commands::Clone { url, target_dir } => CloneCommand::execute(url, target_dir).await,
+        Commands::Clone {
+            lazy,
+            ondemand,
+            url,
+            target_dir,
+        } => CloneCommand::execute(url, target_dir, lazy, ondemand).await,
         Commands::Fetch { remote } => FetchCommand::execute(remote).await,
         Commands::Server { addr, subcommand } => ServerCommand::execute(addr, subcommand).await,
 

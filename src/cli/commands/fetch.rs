@@ -1,6 +1,11 @@
 use crate::config;
 use crate::config::remotes::RemoteConfig;
+use crate::config::user::ClientConfig;
 use crate::network::client::AstriaClient;
+use crate::network::protocol::SyncMode;
+use crate::queue::TaskQueue;
+use crate::virtual_index::VirtualIndex;
+use crate::worker::BackgroundWorker;
 use std::io::{Error, ErrorKind, Result};
 
 pub struct FetchCommand;
@@ -47,6 +52,14 @@ impl FetchCommand {
         let client = AstriaClient::new(server_addr);
         let client_id = "cli_user".to_string();
         let (repository, auth_token) = remote_config.get_auth_data(&remote_name)?;
+        let mode = ClientConfig::load_from_repository(&current_dir)
+            .map(|config| config.checkout_mode())
+            .unwrap_or_else(|_| "full".to_string());
+        let sync_mode = match mode.as_str() {
+            "lazy" => SyncMode::Lazy,
+            "ondemand" => SyncMode::OnDemand,
+            _ => SyncMode::Full,
+        };
         let known_objects = crate::storage::load_known_commits(&current_dir)?;
         client
             .fetch(
@@ -54,10 +67,27 @@ impl FetchCommand {
                 &client_id,
                 &auth_token,
                 &repository,
+                sync_mode,
                 known_objects,
             )
             .await
             .map_err(|e| Error::new(ErrorKind::Other, format!("QUIC fetch failed: {}", e)))?;
+
+        if sync_mode == SyncMode::Lazy {
+            let index = VirtualIndex::load(&dir)?;
+            for entry in index.entries.iter().filter(|entry| entry.is_virtual) {
+                TaskQueue::push_hydrate(
+                    &dir,
+                    &remote_name,
+                    url,
+                    &repository,
+                    &auth_token,
+                    &entry.path,
+                    &entry.hash,
+                )?;
+            }
+            BackgroundWorker::spawn(&dir);
+        }
 
         println!("Fetch successful! CAS updated.");
         Ok(())

@@ -128,6 +128,10 @@ pub enum Commands {
 
     /// Clone a repository into a new directory
     Clone {
+        #[arg(long)]
+        lazy: bool,
+        #[arg(long)]
+        ondemand: bool,
         /// URL or address of the remote repository (e.g., quic://127.0.0.1:4433)
         url: String,
         target_dir: Option<String>,

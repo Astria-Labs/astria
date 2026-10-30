@@ -8,6 +8,7 @@ pub mod server;
 pub mod storage;
 pub mod utils;
 pub mod vector;
+pub mod virtual_index;
 pub mod worker;
 
 pub mod network {

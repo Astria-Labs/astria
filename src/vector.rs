@@ -18,6 +18,16 @@ pub trait SemanticIndexer: Send + Sync {
     async fn search(&self, query_term: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
+#[derive(Debug, Clone)]
+pub struct SemanticSearchResult {
+    pub file: String,
+    pub name: String,
+    pub kind: String,
+    pub start_line: i32,
+    pub end_line: i32,
+    pub distance: f32,
+}
+
 pub struct VectorStore {
     db: Connection,
     db_path: String,
@@ -39,6 +49,89 @@ impl VectorStore {
             model,
         })
     }
+
+    pub async fn search_matches(
+        &self,
+        query_term: &str,
+        limit: usize,
+    ) -> Result<Vec<SemanticSearchResult>, Box<dyn std::error::Error>> {
+        let table_names = self.db.table_names().execute().await?;
+        if !table_names.contains(&"code_index".to_string()) {
+            return Ok(Vec::new());
+        }
+
+        let table = self.db.open_table("code_index").execute().await?;
+        let query_embedding = self.model.embed(vec![query_term.to_string()], None)?;
+
+        if query_embedding.is_empty() {
+            return Err("Falha ao gerar embedding para o termo de busca.".into());
+        }
+
+        let query_vector = query_embedding[0].clone();
+        let results = table
+            .vector_search(query_vector)?
+            .distance_type(DistanceType::Cosine)
+            .limit(limit)
+            .execute()
+            .await?;
+
+        let mut matches = Vec::new();
+        let mut stream = results;
+
+        while let Some(batch) = stream.try_next().await? {
+            let file_array = batch
+                .column_by_name("file")
+                .ok_or_else(|| "Missing 'file' column".to_string())?
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| "Invalid type for 'file'".to_string())?;
+
+            let name_array = batch
+                .column_by_name("name")
+                .ok_or_else(|| "Missing 'name' column".to_string())?
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| "Invalid type for 'name'".to_string())?;
+
+            let kind_array = batch
+                .column_by_name("kind")
+                .ok_or_else(|| "Missing 'kind' column".to_string())?
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| "Invalid type for 'kind'".to_string())?;
+
+            let start_array = batch
+                .column_by_name("start_line")
+                .ok_or_else(|| "Missing 'start_line' column".to_string())?
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .ok_or_else(|| "Invalid type for 'start_line'".to_string())?;
+
+            let end_array = batch
+                .column_by_name("end_line")
+                .ok_or_else(|| "Missing 'end_line' column".to_string())?
+                .as_any()
+                .downcast_ref::<Int32Array>()
+                .ok_or_else(|| "Invalid type for 'end_line'".to_string())?;
+
+            let distances = batch
+                .column_by_name("_distance")
+                .and_then(|col| col.as_any().downcast_ref::<Float32Array>());
+
+            for i in 0..batch.num_rows() {
+                matches.push(SemanticSearchResult {
+                    file: file_array.value(i).to_string(),
+                    name: name_array.value(i).to_string(),
+                    kind: kind_array.value(i).to_string(),
+                    start_line: start_array.value(i),
+                    end_line: end_array.value(i),
+                    distance: distances.map(|d| d.value(i)).unwrap_or(0.0),
+                });
+            }
+        }
+
+        Ok(matches)
+    }
 }
 
 #[async_trait]
@@ -46,8 +139,9 @@ impl SemanticIndexer for VectorStore {
     async fn store_chunks(&self, chunks: &[CodeChunk]) -> Result<(), Box<dyn std::error::Error>> {
         let path = std::path::Path::new(&self.db_path);
         if path.exists() {
-            let _ = std::fs::remove_dir_all(path);
+            std::fs::remove_dir_all(path)?;
         }
+        std::fs::create_dir_all(path)?;
 
         let db = connect(&self.db_path).execute().await?;
 
@@ -147,98 +241,25 @@ impl SemanticIndexer for VectorStore {
     }
 
     async fn search(&self, query_term: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let table_names = self.db.table_names().execute().await?;
-        if !table_names.contains(&"code_index".to_string()) {
+        let matches = self.search_matches(query_term, 5).await?;
+        if matches.is_empty() {
             println!("No semantic index found. Run 'cargo run -- commit' first.");
             return Ok(());
         }
 
-        let table = self.db.open_table("code_index").execute().await?;
-
-        // Chamada direta e síncrona do fastembed para o termo de busca
-        let query_embedding = self.model.embed(vec![query_term.to_string()], None)?;
-
-        if query_embedding.is_empty() {
-            return Err("Falha ao gerar embedding para o termo de busca.".into());
-        }
-
-        let query_vector = query_embedding[0].clone();
-
-        let results = table
-            .vector_search(query_vector)?
-            .distance_type(DistanceType::Cosine)
-            .limit(5)
-            .execute()
-            .await?;
-
-        let mut found_count = 0;
-        let mut stream = results;
-
-        while let Some(batch) = stream.try_next().await? {
-            let file_array = batch
-                .column_by_name("file")
-                .ok_or_else(|| "Missing 'file' column".to_string())?
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| "Invalid type for 'file'".to_string())?;
-
-            let name_array = batch
-                .column_by_name("name")
-                .ok_or_else(|| "Missing 'name' column".to_string())?
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| "Invalid type for 'name'".to_string())?;
-
-            let kind_array = batch
-                .column_by_name("kind")
-                .ok_or_else(|| "Missing 'kind' column".to_string())?
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .ok_or_else(|| "Invalid type for 'kind'".to_string())?;
-
-            let start_array = batch
-                .column_by_name("start_line")
-                .ok_or_else(|| "Missing 'start_line' column".to_string())?
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .ok_or_else(|| "Invalid type for 'start_line'".to_string())?;
-
-            let end_array = batch
-                .column_by_name("end_line")
-                .ok_or_else(|| "Missing 'end_line' column".to_string())?
-                .as_any()
-                .downcast_ref::<Int32Array>()
-                .ok_or_else(|| "Invalid type for 'end_line'".to_string())?;
-
-            let distances = batch
-                .column_by_name("_distance")
-                .and_then(|col| col.as_any().downcast_ref::<Float32Array>());
-
-            for i in 0..batch.num_rows() {
-                found_count += 1;
-                let distance = distances.map(|d| d.value(i)).unwrap_or(0.0);
-
-                println!(
-                    "  🎯 [Score/Dist: {:.4}] File: {} | [{}] '{}' (Lines {}-{})",
-                    distance,
-                    file_array.value(i),
-                    kind_array.value(i),
-                    name_array.value(i),
-                    start_array.value(i),
-                    end_array.value(i)
-                );
-            }
-        }
-
-        if found_count == 0 {
+        for result in &matches {
             println!(
-                "No semantically matching code blocks found for '{}'.",
-                query_term
+                "  🎯 [Score/Dist: {:.4}] File: {} | [{}] '{}' (Lines {}-{})",
+                result.distance,
+                result.file,
+                result.kind,
+                result.name,
+                result.start_line,
+                result.end_line
             );
-        } else {
-            println!("\nFound {} semantic match(es).", found_count);
         }
 
+        println!("\nFound {} semantic match(es).", matches.len());
         Ok(())
     }
 }

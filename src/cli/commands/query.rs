@@ -1,9 +1,14 @@
 use crate::config;
+use crate::config::remotes::RemoteConfig;
+use crate::config::user::ClientConfig;
+use crate::network::client::AstriaClient;
 use crate::parser::SemanticParser;
 use crate::utils::commit::CommitUtils;
 use crate::vector;
 use crate::vector::VectorStore;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
 
 pub struct QueryCommand;
 
@@ -28,7 +33,16 @@ impl QueryCommand {
         }
 
         if let Some(ref ai_query) = ai {
-            let db_path_str = dir.to_str().ok_or_else(|| {
+            let mode = ClientConfig::load_from_repository(&current_dir)
+                .map(|config| config.checkout_mode())
+                .unwrap_or_else(|_| "full".to_string());
+            if mode == "ondemand" {
+                Self::execute_ondemand_ai_query(&current_dir, &dir, ai_query).await?;
+                return Ok(());
+            }
+
+            let vectors_dir = dir.join("vectors");
+            let db_path_str = vectors_dir.to_str().ok_or_else(|| {
                 std::io::Error::new(std::io::ErrorKind::Other, "Invalid path string")
             })?;
 
@@ -121,6 +135,100 @@ impl QueryCommand {
             println!("\nTotal matching symbols found: {}", matches_count);
         }
 
+        Ok(())
+    }
+
+    async fn execute_ondemand_ai_query(
+        repo_path: &std::path::Path,
+        repo_dir: &std::path::Path,
+        ai_query: &str,
+    ) -> std::io::Result<()> {
+        let remote_config = RemoteConfig::load_from_repository(repo_path).map_err(|e| {
+            Error::new(
+                ErrorKind::NotFound,
+                format!("Failed to load .astria/remotes: {}", e),
+            )
+        })?;
+        let remote = remote_config.get_remote("origin")?;
+        if remote.url.trim().is_empty() {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Remote 'origin' is missing an URL in .astria/remotes.",
+            ));
+        }
+        if !remote.url.starts_with("quic://") {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Ondemand semantic query currently requires a quic:// origin remote.",
+            ));
+        }
+
+        let (repository, auth_token) = remote_config.get_auth_data("origin")?;
+        let addr: SocketAddr = remote
+            .url
+            .trim_start_matches("quic://")
+            .parse()
+            .map_err(|e| {
+                Error::new(ErrorKind::InvalidData, format!("Invalid remote URL: {}", e))
+            })?;
+
+        let client = AstriaClient::new(addr);
+        let matches = client
+            .semantic_query("cli_user", &auth_token, &repository, ai_query, 5)
+            .await
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Semantic query failed: {}", e)))?;
+
+        if matches.is_empty() {
+            println!(
+                "No semantically matching code blocks found for '{}'.",
+                ai_query
+            );
+            return Ok(());
+        }
+
+        let mut requested_hashes = HashSet::new();
+        let mut paths_to_materialize = Vec::new();
+
+        for result in &matches {
+            println!(
+                "  🎯 [Score/Dist: {:.4}] File: {} | [{}] '{}' (Lines {}-{})",
+                result.distance,
+                result.file,
+                result.kind,
+                result.name,
+                result.start_line,
+                result.end_line
+            );
+
+            if let Some(hash) = &result.blob_hash {
+                if requested_hashes.insert(hash.clone()) {
+                    paths_to_materialize.push((result.file.clone(), hash.clone()));
+                }
+            }
+        }
+
+        println!("\nFound {} semantic match(es).", matches.len());
+
+        if requested_hashes.is_empty() {
+            println!("No blob references were returned for these matches.");
+            return Ok(());
+        }
+
+        let hashes: Vec<String> = requested_hashes.into_iter().collect();
+        client
+            .fetch_objects(repo_path, "cli_user", &auth_token, &repository, hashes)
+            .await
+            .map_err(|e| Error::new(ErrorKind::Other, format!("Hydration failed: {}", e)))?;
+
+        let mut materialized = 0;
+        for (path, hash) in paths_to_materialize {
+            AstriaClient::materialize_blob(repo_path, &path, &hash)
+                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+            materialized += 1;
+        }
+
+        let _ = crate::virtual_index::VirtualIndex::load(repo_dir)?;
+        println!("Materialized {} file(s) for ondemand query.", materialized);
         Ok(())
     }
 }
