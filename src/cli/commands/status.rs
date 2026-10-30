@@ -1,28 +1,31 @@
 use crate::config;
-use std::collections::HashMap;
-use crate::utils::index::IndexUtils;
 use crate::utils::commit::CommitUtils;
+use crate::utils::index::IndexUtils;
+use std::collections::HashMap;
 
 pub struct StatusCommand;
 
 impl StatusCommand {
-
     pub fn execute() -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
-        
+
         if !dir.exists() {
             println!("Error: Astria repository not initialized.");
             return Ok(());
         }
 
-        let head_content = std::fs::read_to_string(dir.join("HEAD"))?.trim().to_string();
+        let head_content = std::fs::read_to_string(dir.join("HEAD"))?
+            .trim()
+            .to_string();
         if head_content.starts_with("ref: refs/heads/") {
             println!("On branch {}", &head_content[16..]);
         } else {
-            println!("HEAD detached at {}", &head_content[7.min(head_content.len())..]);
+            println!(
+                "HEAD detached at {}",
+                &head_content[7.min(head_content.len())..]
+            );
         }
 
         let head_commit_opt = CommitUtils::get_head_commit_hash(&dir)
@@ -31,7 +34,6 @@ impl StatusCommand {
         let committed_files = if let Some(ref head_commit) = head_commit_opt {
             CommitUtils::load_commit_rust_files(&dir, head_commit)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
-
         } else {
             HashMap::new()
         };

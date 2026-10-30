@@ -1,8 +1,7 @@
-
+use astria::objects::commit::commit::Commit;
+use astria::utils::commit::CommitUtils;
 use std::fs;
 use tempfile::tempdir;
-use astria::utils::commit::CommitUtils;
-use astria::objects::commit::commit::Commit;
 
 #[test]
 fn test_dag_multiple_parents_and_integrity() {

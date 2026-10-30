@@ -1,16 +1,16 @@
-use tree_sitter::Parser;
 use std::collections::BTreeMap;
+use tree_sitter::Parser;
 
 /// Represents a code chunk extracted via AST analysis (used for Vector Indexing)
 #[derive(Debug, Clone)]
 pub struct CodeChunk {
     pub file: String,
-    pub kind: String,       // e.g., "function_item", "struct_item"
-    pub name: String,       // Identifier/Name of the function or struct
+    pub kind: String, // e.g., "function_item", "struct_item"
+    pub name: String, // Identifier/Name of the function or struct
     pub start_line: usize,
     pub end_line: usize,
     #[allow(dead_code)]
-    pub content: String,    // Raw code slice corresponding to the chunk
+    pub content: String, // Raw code slice corresponding to the chunk
 }
 
 /// Represents structural info of a symbol for AST Diffing
@@ -50,7 +50,11 @@ impl SemanticParser {
         for i in 0..root_node.child_count() {
             if let Some(child) = root_node.child(i) {
                 let kind = child.kind();
-                if kind == "function_item" || kind == "struct_item" || kind == "enum_item" || kind == "trait_item" {
+                if kind == "function_item"
+                    || kind == "struct_item"
+                    || kind == "enum_item"
+                    || kind == "trait_item"
+                {
                     if let Some(name_node) = child.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(bytes) {
                             let start_line = child.start_position().row + 1;
@@ -88,7 +92,11 @@ impl SemanticParser {
         for i in 0..root_node.child_count() {
             if let Some(child) = root_node.child(i) {
                 let kind = child.kind();
-                if kind == "function_item" || kind == "struct_item" || kind == "enum_item" || kind == "trait_item" {
+                if kind == "function_item"
+                    || kind == "struct_item"
+                    || kind == "enum_item"
+                    || kind == "trait_item"
+                {
                     if let Some(name_node) = child.child_by_field_name("name") {
                         if let Ok(name) = name_node.utf8_text(bytes) {
                             let symbol_type = kind.replace("_item", "");
@@ -105,7 +113,7 @@ impl SemanticParser {
                                     symbol_type,
                                     content_hash,
                                     is_public: true,
-                                    line_number: child.start_position().row + 1
+                                    line_number: child.start_position().row + 1,
                                 },
                             );
                         }

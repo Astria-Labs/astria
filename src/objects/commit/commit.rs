@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
 use crate::objects::astria::astria::Astria;
 use crate::objects::object_type::ObjectType;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Commit {
@@ -18,10 +18,7 @@ impl Commit {
             .unwrap()
             .as_secs();
 
-        let clean_parent = parents
-            .into_iter()
-            .map(|p| p.trim().to_string())
-            .collect();
+        let clean_parent = parents.into_iter().map(|p| p.trim().to_string()).collect();
 
         Self {
             tree_hash,

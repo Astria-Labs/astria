@@ -1,17 +1,16 @@
+use crate::objects::astria::astria::Astria;
+use crate::objects::tree::tree::Tree;
+use crate::parser::SemanticParser;
+use crate::queue::TaskQueue;
+use crate::vector::{SemanticIndexer, VectorStore};
 use std::fs;
 use std::path::Path;
-use std::process::Stdio;
 use std::process::Command;
-use crate::queue::TaskQueue;
-use crate::parser::SemanticParser;
-use crate::vector::{VectorStore, SemanticIndexer};
-use crate::objects::tree::tree::Tree;
-use crate::objects::astria::astria::Astria;
+use std::process::Stdio;
 
 pub struct BackgroundWorker;
 
 impl BackgroundWorker {
-
     pub fn run(repo_dir: &Path) -> std::io::Result<()> {
         if !repo_dir.exists() {
             println!("Error: Astria repository not initialized.");
@@ -75,16 +74,28 @@ impl BackgroundWorker {
                     match TaskQueue::pop(&repo_path) {
                         Ok(Some((task_path, task))) => {
                             last_activity = std::time::Instant::now();
-                            println!("⚙️ Processing semantic for commit: {}", &task.commit_hash[..7]);
-                            let result = Self::process_commit_semantics(&repo_path, &task.tree_hash).await;
+                            println!(
+                                "⚙️ Processing semantic for commit: {}",
+                                &task.commit_hash[..7]
+                            );
+                            let result =
+                                Self::process_commit_semantics(&repo_path, &task.tree_hash).await;
 
                             match result {
                                 Ok(count) => {
-                                    println!("✨ Finished: {} chunks indexed for commit {}", count, &task.commit_hash[..7]);
+                                    println!(
+                                        "✨ Finished: {} chunks indexed for commit {}",
+                                        count,
+                                        &task.commit_hash[..7]
+                                    );
                                     let _ = fs::remove_file(task_path);
                                 }
                                 Err(e) => {
-                                    eprintln!("❌ Failed to process commit semantics {}: {}", &task.commit_hash[..7], e);
+                                    eprintln!(
+                                        "❌ Failed to process commit semantics {}: {}",
+                                        &task.commit_hash[..7],
+                                        e
+                                    );
                                     let _ = fs::remove_file(task_path);
                                 }
                             }
@@ -112,7 +123,10 @@ impl BackgroundWorker {
     }
 
     /// Internal logic that reads a Tree and processes SemanticParser + VectorStore
-    async fn process_commit_semantics(repo_dir: &Path, tree_hash: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    async fn process_commit_semantics(
+        repo_dir: &Path,
+        tree_hash: &str,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         let tree_path = repo_dir.join("objects").join(tree_hash);
         if !tree_path.exists() {
             return Err(format!("Tree object {} not found", tree_hash).into());
@@ -139,9 +153,7 @@ impl BackgroundWorker {
 
         if !all_chunks.is_empty() {
             let db_path = repo_dir.to_str().ok_or("Invalid path string")?;
-            let indexer: Box<dyn SemanticIndexer> = Box::new(
-                VectorStore::new(db_path).await?
-            );
+            let indexer: Box<dyn SemanticIndexer> = Box::new(VectorStore::new(db_path).await?);
             indexer.store_chunks(&all_chunks).await?;
         }
 
@@ -152,7 +164,7 @@ impl BackgroundWorker {
         let lock_file = repo_dir.join("worker.lock");
 
         if lock_file.exists() {
-            return; 
+            return;
         }
 
         if let Ok(exe_path) = std::env::current_exe() {
@@ -176,7 +188,6 @@ impl BackgroundWorker {
                 stdout.contains(&pid.to_string())
             })
             .unwrap_or(false)
-
     }
 
     fn kill_unix_process(pid: &u32) -> bool {

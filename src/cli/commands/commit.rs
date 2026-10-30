@@ -1,25 +1,19 @@
-
 use crate::config;
-use crate::queue::TaskQueue;
-use std::collections::HashMap;
 use crate::config::user::User;
+use crate::queue::TaskQueue;
+use crate::utils::commit::CommitUtils;
 use crate::utils::index::IndexUtils;
 use crate::worker::BackgroundWorker;
-use crate::utils::commit::CommitUtils;
+use std::collections::HashMap;
 
 use crate::objects::{
-    blob::blob::Blob,
-    tree::tree::Tree,
-    commit::commit::Commit,
-    tree::tree_entry::TreeEntry,
+    blob::blob::Blob, commit::commit::Commit, tree::tree::Tree, tree::tree_entry::TreeEntry,
 };
 
 pub struct CommitCommand;
 
 impl CommitCommand {
-
     pub fn execute(message: String) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
@@ -60,7 +54,6 @@ impl CommitCommand {
         let mut tree_entries = Vec::new();
 
         for (path, status) in &index_map {
-
             if status != "staged" {
                 continue;
             }
@@ -104,21 +97,20 @@ impl CommitCommand {
         // Garantee deterministic ordering
         tree_entries.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let tree = Tree { entries: tree_entries.clone() };
-        let tree_hash = tree.save(&dir)
+        let tree = Tree {
+            entries: tree_entries.clone(),
+        };
+        let tree_hash = tree
+            .save(&dir)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         CommitUtils::validate_object_exists(&dir, &tree_hash)?;
 
         let author = User::get_user(&dir);
-        let commit = Commit::new(
-            tree_hash.clone(),
-            parents,
-            message,
-            author,
-        );
+        let commit = Commit::new(tree_hash.clone(), parents, message, author);
         let commit_main_object = commit.to_astria_object();
-        let commit_hash = commit_main_object.save(&dir)
+        let commit_hash = commit_main_object
+            .save(&dir)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         CommitUtils::update_head(&dir, &commit_hash)?;

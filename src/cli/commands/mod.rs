@@ -1,41 +1,49 @@
 pub mod add;
-pub mod log;
-pub mod init;
-pub mod show;
-pub mod diff;
-pub mod pull;
-pub mod query;
-pub mod merge;
-pub mod config;
-pub mod reset;
 pub mod branch;
-pub mod status;
-pub mod commit;
-pub mod remote;
-pub mod worker;
 pub mod checkout;
+pub mod clone;
+pub mod commit;
+pub mod config;
+pub mod diff;
+pub mod fetch;
+pub mod init;
+pub mod log;
+pub mod merge;
+pub mod pull;
+pub mod push;
+pub mod query;
+pub mod remote;
+pub mod reset;
+pub mod server;
+pub mod show;
+pub mod status;
+pub mod worker;
 
-use add::AddCommand;
-use log::LogCommand;
-use pull::PullCommand;
-use init::InitCommand;
-use show::ShowCommand;
-use diff::DiffCommand;
-use query::QueryCommand;
-use reset::ResetCommand;
-use merge::MergeCommand;
-use config::ConfigCommand;
-use branch::BranchCommand;
-use status::StatusCommand;
-use commit::CommitCommand;
-use worker::WorkerCommand;
-use remote::RemoteCommand;
-use checkout::CheckoutCommand;
 use crate::cli::args::{Commands, RemoteCommands};
+use add::AddCommand;
+use branch::BranchCommand;
+use checkout::CheckoutCommand;
+use clone::CloneCommand;
+use commit::CommitCommand;
+use config::ConfigCommand;
+use diff::DiffCommand;
+use fetch::FetchCommand;
+use init::InitCommand;
+use log::LogCommand;
+use merge::MergeCommand;
+use pull::PullCommand;
+use push::PushCommand;
+use query::QueryCommand;
+use remote::RemoteCommand;
+use reset::ResetCommand;
+use server::ServerCommand;
+use show::ShowCommand;
+use status::StatusCommand;
+use worker::WorkerCommand;
 
 pub async fn execute(command: Commands) -> std::io::Result<()> {
     match command {
-        Commands::Add { paths }=> AddCommand::execute(paths),
+        Commands::Add { paths } => AddCommand::execute(paths),
         Commands::Log => LogCommand::execute(),
         Commands::Init => InitCommand::execute(),
         Commands::Worker => WorkerCommand::execute(),
@@ -48,11 +56,22 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
         Commands::Reset { path } => ResetCommand::execute(path),
         Commands::Merge { target } => MergeCommand::execute(target),
         Commands::Config { global, args } => ConfigCommand::execute(global, args),
-        Commands::Query { 
-            search ,func, r#struct, interface, pub_only, file, commit, ai
-        } => QueryCommand::execute(search, func, r#struct, interface, pub_only, file, commit, ai).await,
+        Commands::Query {
+            search,
+            func,
+            r#struct,
+            interface,
+            pub_only,
+            file,
+            commit,
+            ai,
+        } => {
+            QueryCommand::execute(
+                search, func, r#struct, interface, pub_only, file, commit, ai,
+            )
+            .await
+        }
 
-        
         // Dentro do `execute` principal:
         // Remote commands
         Commands::Remote(remote_cmd) => match remote_cmd {
@@ -62,7 +81,11 @@ pub async fn execute(command: Commands) -> std::io::Result<()> {
             RemoteCommands::Remove { name } => RemoteCommand::remove(name),
         },
 
-        Commands::Pull { remote } => PullCommand::execute(remote),
+        Commands::Pull { remote } => PullCommand::execute(remote).await,
+        Commands::Push { remote } => PushCommand::execute(remote).await,
+        Commands::Clone { url, target_dir } => CloneCommand::execute(url, target_dir).await,
+        Commands::Fetch { remote } => FetchCommand::execute(remote).await,
+        Commands::Server { addr, subcommand } => ServerCommand::execute(addr, subcommand).await,
 
         #[allow(unreachable_patterns)]
         _ => {

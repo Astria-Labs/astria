@@ -114,6 +114,35 @@ pub enum Commands {
         remote: String,
     },
 
+    /// Push local changes to a remote repository
+    Push {
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+
+    /// Fetch changes from a remote repository without merging
+    Fetch {
+        #[arg(default_value = "origin")]
+        remote: String,
+    },
+
+    /// Clone a repository into a new directory
+    Clone {
+        /// URL or address of the remote repository (e.g., quic://127.0.0.1:4433)
+        url: String,
+        target_dir: Option<String>,
+    },
+
+    /// Start the Astria network server
+    Server {
+        /// Socket address to listen on
+        #[arg(long, default_value = "127.0.0.1:4433")]
+        addr: String,
+
+        #[command(subcommand)]
+        subcommand: Option<ServerSubCommand>,
+    },
+
     /// Manage set of tracked repositories (remotes)
     #[command(subcommand)]
     Remote(RemoteCommands),
@@ -136,5 +165,30 @@ pub enum RemoteCommands {
     #[command(visible_alias = "rm")]
     Remove {
         name: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServerSubCommand {
+    /// Start the network server daemon
+    Start,
+    /// Token management for server access
+    Token {
+        #[command(subcommand)]
+        command: TokenSubCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TokenSubCommand {
+    /// Create a new personal access token (PAT)
+    Create {
+        #[arg(short, long)]
+        user: String,
+        repo: String,
+        perms: String,
+
+        #[arg(long, default_value = "30d")]
+        expires: String, // E.g "30d", "90d", "never"
     },
 }

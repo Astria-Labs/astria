@@ -1,14 +1,12 @@
 use crate::config;
-use std::collections::BTreeSet;
 use crate::parser::SemanticParser;
 use crate::utils::commit::CommitUtils;
+use std::collections::BTreeSet;
 
 pub struct DiffCommand;
 
 impl DiffCommand {
-
     pub fn execute(targets: Vec<String>) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
@@ -25,7 +23,7 @@ impl DiffCommand {
                     Ok(None) => {
                         println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
                         std::process::exit(0);
-                    },
+                    }
                     Err(e) => return Err(e.into()),
                 };
                 let f_head = CommitUtils::load_commit_rust_files(&dir, &head_commit)
@@ -34,12 +32,18 @@ impl DiffCommand {
                 let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-                (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), None)
+                (
+                    f_head,
+                    f_ws,
+                    format!("HEAD ({})", &head_commit[..7]),
+                    "workspace".to_string(),
+                    None,
+                )
             }
             1 => {
                 let target = &targets[0];
                 let target_path = current_dir.join(target);
-                
+
                 if target_path.exists() && target_path.is_file() {
                     // Ex: "ast diff src/main.rs" -> Compara o arquivo atual com o HEAD
                     let head_commit = match CommitUtils::get_head_commit_hash(&dir) {
@@ -47,25 +51,42 @@ impl DiffCommand {
                         Ok(None) => {
                             println!("No HEAD commits found yet. Run 'ast commit' to create your first commit.");
                             std::process::exit(0);
-                        },
+                        }
                         Err(e) => return Err(e.into()),
                     };
-                    let f_head = CommitUtils::load_commit_rust_files(&dir, &head_commit)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-                    
-                    let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    let f_head =
+                        CommitUtils::load_commit_rust_files(&dir, &head_commit).map_err(|e| {
+                            std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                        })?;
 
-                    (f_head, f_ws, format!("HEAD ({})", &head_commit[..7]), "workspace".to_string(), Some(target.clone()))
+                    let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir).map_err(
+                        |e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    )?;
+
+                    (
+                        f_head,
+                        f_ws,
+                        format!("HEAD ({})", &head_commit[..7]),
+                        "workspace".to_string(),
+                        Some(target.clone()),
+                    )
                 } else {
                     // Ex: "ast diff <COMMIT_HASH>" -> Compara o commit informado com o Workspace atual
-                    let f_a = CommitUtils::load_commit_rust_files(&dir, target)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    let f_a = CommitUtils::load_commit_rust_files(&dir, target).map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                    })?;
 
-                    let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    let f_ws = CommitUtils::load_workspace_rust_files(&current_dir, &dir).map_err(
+                        |e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                    )?;
 
-                    (f_a, f_ws, format!("commit {}", &target[..7.min(target.len())]), "workspace".to_string(), None)
+                    (
+                        f_a,
+                        f_ws,
+                        format!("commit {}", &target[..7.min(target.len())]),
+                        "workspace".to_string(),
+                        None,
+                    )
                 }
             }
             2 => {
@@ -77,12 +98,20 @@ impl DiffCommand {
                 let f_b = CommitUtils::load_commit_rust_files(&dir, b)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-                (f_a, f_b, format!("commit {}", &a[..7.min(a.len())]), format!("commit {}", &b[..7.min(b.len())]), None)
+                (
+                    f_a,
+                    f_b,
+                    format!("commit {}", &a[..7.min(a.len())]),
+                    format!("commit {}", &b[..7.min(b.len())]),
+                    None,
+                )
             }
-            _ => return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Too many arguments for diff."
-            )),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Too many arguments for diff.",
+                ))
+            }
         };
 
         println!("🔍 AST Semantic Diff: {} ➔ {}\n", label_old, label_new);
@@ -126,15 +155,18 @@ impl DiffCommand {
                 }
             }
 
-            let unmatched_new: Vec<_> = symbols_new.iter().filter(|(k, _)| !matched_new.contains(*k)).collect();
+            let unmatched_new: Vec<_> = symbols_new
+                .iter()
+                .filter(|(k, _)| !matched_new.contains(*k))
+                .collect();
             let mut consumed_old = BTreeSet::new();
 
             for (key_new, sym_new) in unmatched_new {
                 let found_old = symbols_old.iter().find(|(k_old, sym_old)| {
-                    !matched_old.contains(*k_old) 
-                    && !consumed_old.contains(*k_old)
-                    && sym_old.symbol_type == sym_new.symbol_type
-                    && sym_old.content_hash == sym_new.content_hash
+                    !matched_old.contains(*k_old)
+                        && !consumed_old.contains(*k_old)
+                        && sym_old.symbol_type == sym_new.symbol_type
+                        && sym_old.content_hash == sym_new.content_hash
                 });
 
                 if let Some((key_old, sym_old)) = found_old {
@@ -146,7 +178,10 @@ impl DiffCommand {
                         println!("  File: {}", file);
                         file_printed = true;
                     }
-                    println!("    [RENAMED]  {} '{}' ➔ '{}'", sym_new.symbol_type, sym_old.name, sym_new.name);
+                    println!(
+                        "    [RENAMED]  {} '{}' ➔ '{}'",
+                        sym_new.symbol_type, sym_old.name, sym_new.name
+                    );
                     total_changes += 1;
                 }
             }

@@ -1,8 +1,8 @@
-use std::path::Path;
-use serde::{Serialize, Deserialize};
 use crate::objects::astria::astria::Astria;
 use crate::objects::object_type::ObjectType;
 use crate::objects::tree::tree_entry::TreeEntry;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Tree {

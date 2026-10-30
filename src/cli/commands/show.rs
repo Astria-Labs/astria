@@ -1,17 +1,12 @@
 use crate::config;
 use crate::objects::{
-    tree::tree::Tree,
-    astria::astria::Astria,
-    commit::commit::Commit,
-    object_type::ObjectType,
+    astria::astria::Astria, commit::commit::Commit, object_type::ObjectType, tree::tree::Tree,
 };
 
 pub struct ShowCommand;
 
 impl ShowCommand {
-
     pub fn execute(hash: String) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
@@ -27,16 +22,15 @@ impl ShowCommand {
             if let Ok(entries) = std::fs::read_dir(&objects_dir) {
                 let matching: Vec<_> = entries
                     .filter_map(Result::ok)
-                    .filter(|e| {
-                        e.file_name()
-                            .to_string_lossy()
-                            .starts_with(&hash)
-                    })
+                    .filter(|e| e.file_name().to_string_lossy().starts_with(&hash))
                     .collect();
                 if matching.len() == 1 {
                     target_path = matching[0].path();
                 } else if matching.len() > 1 {
-                    println!("Ambiguous hash prefix '{}'. Matches multiple objects.", hash);
+                    println!(
+                        "Ambiguous hash prefix '{}'. Matches multiple objects.",
+                        hash
+                    );
                     return Ok(());
                 } else {
                     println!("Object {} not found.", hash);
@@ -78,7 +72,10 @@ impl ShowCommand {
                 println!("=== TREE OBJECT ===");
                 println!("Entries ({} files):", tree_obj.entries.len());
                 for entry in tree_obj.entries {
-                    println!("  mode: {:o} | hash: {} | path: {}", entry.mode, entry.object_hash, entry.name);
+                    println!(
+                        "  mode: {:o} | hash: {} | path: {}",
+                        entry.mode, entry.object_hash, entry.name
+                    );
                 }
             }
             ObjectType::Blob => {

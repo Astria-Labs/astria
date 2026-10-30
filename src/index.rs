@@ -1,7 +1,7 @@
-use std::fs;
 use crate::config;
-use serde::{Serialize, Deserialize};
-use std::io::{Result, Error, ErrorKind};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{Error, ErrorKind, Result};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IndexEntry {
@@ -42,13 +42,16 @@ impl Index {
     /// Salva o index de volta em disco (.astria/index)
     pub fn save(&self) -> Result<()> {
         let current_dir = std::env::current_dir()?;
-        let cfg = config::CONFIG_GLOBAL.get().ok_or_else(|| {
-            Error::new(ErrorKind::NotFound, "Astria configuration not loaded.")
-        })?;
+        let cfg = config::CONFIG_GLOBAL
+            .get()
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Astria configuration not loaded."))?;
 
         let dir = current_dir.join(&cfg.config_folder);
         if !dir.exists() {
-            return Err(Error::new(ErrorKind::NotFound, "Astria repository not initialized."));
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Astria repository not initialized.",
+            ));
         }
 
         let index_path = dir.join("index");

@@ -1,103 +1,71 @@
-use std::fs;
 use crate::config;
-use std::process::Command;
-use crate::index::{Index, IndexEntry};
-use std::io::{Result, Error, ErrorKind};
+use crate::config::remotes::RemoteConfig;
+use crate::network::client::AstriaClient;
+use crate::network::simulation::NetworkSimulation;
+use std::io::{Error, ErrorKind, Result};
 
 pub struct PullCommand;
 
 impl PullCommand {
-
-    pub fn execute(remote_name: String) -> Result<()> {
-
+    pub async fn execute(remote_name: String) -> Result<()> {
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
 
         if !dir.exists() {
-            return Err(Error::new(ErrorKind::NotFound, "Astria repository not initialized."));
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Astria repository not initialized.",
+            ));
         }
 
-        let remotes_path = dir.join("remotes");
-        if !remotes_path.exists() {
-            return Err(Error::new(ErrorKind::NotFound, "No remotes configured. Use 'ast remote add' first."));
-        }
-
-        let data = fs::read(&remotes_path)?;
-        let remotes: std::collections::HashMap<String, String> = bincode::deserialize(&data)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-
-        let url = remotes.get(&remote_name).ok_or_else(|| {
-            Error::new(ErrorKind::NotFound, format!("Remote '{}' not found.", remote_name))
+        let remote_config = RemoteConfig::load_from_repository(&current_dir).map_err(|e| {
+            Error::new(
+                ErrorKind::NotFound,
+                format!("Failed to load repository config: {}", e),
+            )
         })?;
+        let remote = remote_config.get_remote(&remote_name)?;
+        let url = &remote.url;
 
         println!("Connecting to remote '{}' at {}...", remote_name, url);
 
         if url.starts_with("local://") || url.starts_with('/') {
             // Mocks a "remote repository" in local disk
             println!("Simulating fetch from local path...");
-            let mock_bytes = Self::generate_mock_metadata()?;
-            Self::update_local_index_with_virtuals(&mock_bytes)?;
+            let mock_bytes = NetworkSimulation::generate_mock_metadata()?;
+            NetworkSimulation::update_local_index_with_virtuals(&mock_bytes)?;
             println!("Pull successful (local simulation)!");
             return Ok(());
         }
 
-        let ssh_target = url.trim_start_matches("ssh://");
-        let output = Command::new("ssh")
-            .arg(ssh_target)
-            .arg("astria-server-internal fetch-metadata")
-            .output();
+        let addr_str = url.trim_start_matches("quic://");
+        let server_addr = addr_str.parse().map_err(|e| {
+            Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid remote socket address: {}", e),
+            )
+        })?;
 
-        match output {
-            Ok(res) if res.status.success() => {
-                let remote_metadata_bytes = res.stdout;
-                Self::update_local_index_with_virtuals(&remote_metadata_bytes)?;
-                println!("Pull successful! Metadata synchronized with virtual file placeholders.");
-            }
-            Ok(res) => {
-                let stderr = String::from_utf8_lossy(&res.stderr);
-                return Err(Error::new(ErrorKind::Other, format!("SSH remote error: {}", stderr)));
-            }
-            Err(e) => {
-                return Err(Error::new(ErrorKind::Other, format!("Failed to execute SSH process: {}", e)));
-            }
-        }
+        let client_id = "cli_user".to_string();
+        let (repository, auth_token) = remote_config.get_auth_data(&remote_name)?;
+
+        let known_commits = crate::storage::load_known_commits(&current_dir)?;
+
+        let client = AstriaClient::new(server_addr);
+        client
+            .pull(
+                &current_dir,
+                &client_id,
+                &auth_token,
+                &repository,
+                known_commits,
+            )
+            .await
+            .map_err(|e| Error::new(ErrorKind::Other, format!("QUIC pull failed: {}", e)))?;
+
+        println!("Pull successful! Objects synchronized via QUIC to CAS.");
 
         Ok(())
-    }
-
-    fn update_local_index_with_virtuals(_metadata_bytes: &[u8]) -> Result<()> {
-
-        let mut index = Index::load()?;
-        let virtual_entry = IndexEntry {
-            path: "src/remote_example.rs".to_string(),
-            hash: "blake3_mock_hash_abc123".to_string(),
-            is_virtual: true,
-            mode: 0o644,
-            size: 1024,
-        };
-
-        index.upsert(virtual_entry);
-        index.save()?;
-
-        println!("Local index updated with virtual file placeholders.");
-        Ok(())
-    }
-
-    fn generate_mock_metadata() -> Result<Vec<u8>> {
-        let mock_entries = vec![
-            IndexEntry {
-                path: "src/phantom_file.rs".to_string(),
-                hash: "blake3_mock_hash_main_001".to_string(),
-                is_virtual: true,
-                mode: 0o644,
-                size: 2048,
-            },
-        ];
-
-        let encoded = bincode::serialize(&mock_entries)
-            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-
-        Ok(encoded)
     }
 }

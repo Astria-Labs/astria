@@ -16,14 +16,22 @@ tree-sitter = "0.24"      # Core parsing engine for AST extraction
 tree-sitter-rust = "0.23" # Rust grammar parser (example for our first AST analyzer)
 lancedb = "0.14"          # Embedded vector database
 tokio = { version = "1.0", features = ["full"] } # Async runtime required by LanceDB
+quinn = { version = "0.11", features = ["ring"] } # QUIC in Rust purely assynchronous
+rustls = { version = "0.23", features = ["ring", "std"] } # Needed for QUIC TLS 1.3
+rcgen = "0.13"
+rusqlite = { version = "0.31", features = ["bundled"] }
+argon2 = "0.5"
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
 arrow-array = "53.0"      # Apache Arrow data structures for LanceDB
 arrow-schema = "53.0"
 clap = { version = "4.4", features = ["derive"] } # CLI argument parsing
 futures = "0.3" # Necessary to iterate over LanceDB stream
-chrono = "0.4"
 async-trait = "0.1"
 fastembed = "4"
 rayon = "1.10"
+toml = "1.1.8"
+hex = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3.8"

@@ -1,15 +1,11 @@
 use crate::config;
+use crate::objects::{astria::astria::Astria, commit::commit::Commit};
 use crate::utils::commit::CommitUtils;
-use crate::objects::{
-    astria::astria::Astria,
-    commit::commit::Commit,
-};
 
 pub struct LogCommand;
 
 impl LogCommand {
     pub fn execute() -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
@@ -33,7 +29,7 @@ impl LogCommand {
 
         while !current_commit_hash.is_empty() {
             commit_count += 1;
-            
+
             let obj_path = dir.join("objects").join(&current_commit_hash);
             if !obj_path.exists() {
                 println!("Error: Commit object {} not found.", current_commit_hash);
@@ -69,7 +65,7 @@ impl LogCommand {
         if commit_count == 0 {
             println!("No commit history available.");
         }
-        
+
         Ok(())
     }
 }

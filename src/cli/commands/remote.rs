@@ -1,6 +1,6 @@
-use std::fs;
 use crate::config;
-use std::io::{Result, Error, ErrorKind};
+use crate::config::remotes::{RemoteConfig, RemoteSection};
+use std::io::{Error, ErrorKind, Result};
 
 pub struct RemoteCommand;
 
@@ -23,40 +23,44 @@ impl RemoteCommand {
             return Ok(());
         }
 
-        // Vamos armazenar as configurações de remote em um arquivo `.astria/remotes` ou dentro do config
-        let remotes_path = dir.join("remotes");
-        
-        // Ler remotes existentes ou criar novo mapa
-        let mut remotes: std::collections::HashMap<String, String> = if remotes_path.exists() {
-            let data = fs::read(&remotes_path)?;
-            bincode::deserialize(&data)
-                .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?
-        } else {
-            std::collections::HashMap::new()
-        };
+        let mut config = RemoteConfig::load_from_repository(&current_dir)?;
 
-        if remotes.contains_key(name) && !is_update {
+        let existing_is_empty = config
+            .remotes
+            .get(name)
+            .map(|remote| {
+                remote.url.trim().is_empty()
+                    && remote.repository.trim().is_empty()
+                    && remote.auth_token.trim().is_empty()
+            })
+            .unwrap_or(false);
+
+        if config.remotes.contains_key(name) && !is_update && !existing_is_empty {
             return Err(Error::new(
                 ErrorKind::AlreadyExists,
-                format!("Remote '{}' already exists. Use 'set-url' to update.", name)
+                format!("Remote '{}' already exists. Use 'set-url' to update.", name),
             ));
         }
 
-        if !remotes.contains_key(name) && is_update {
+        if !config.remotes.contains_key(name) && is_update {
             return Err(Error::new(
                 ErrorKind::NotFound,
-                format!("Remote '{}' does not exist. Use 'add' first.", name)
+                format!("Remote '{}' does not exist. Use 'add' first.", name),
             ));
         }
 
-        remotes.insert(name.to_string(), url.to_string());
+        let remote = config
+            .remotes
+            .entry(name.to_string())
+            .or_insert_with(RemoteSection::default);
+        remote.url = url.to_string();
 
-        // Serializar e salvar de volta no disco
-        let encoded = bincode::serialize(&remotes)
-            .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-        fs::write(&remotes_path, encoded)?;
+        config.save_to_repository(&current_dir)?;
 
-        println!("Remote '{}' configured successfully with URL: {}", name, url);
+        println!(
+            "Remote '{}' configured successfully with URL: {}",
+            name, url
+        );
         Ok(())
     }
 
@@ -70,22 +74,16 @@ impl RemoteCommand {
             return Ok(());
         }
 
-        let remotes_path = dir.join("remotes");
-        if !remotes_path.exists() {
-            println!("No remotes configured.");
-            return Ok(());
-        }
+        let config = RemoteConfig::load_from_repository(&current_dir)?;
 
-        let data = fs::read(&remotes_path)?;
-        let remotes: std::collections::HashMap<String, String> = bincode::deserialize(&data)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-
-        if remotes.is_empty() {
+        if config.remotes.is_empty() {
             println!("No remotes configured.");
         } else {
             println!("Configured remotes:");
-            for (name, url) in remotes {
-                println!("  {} \t{}", name, url);
+            let mut remotes: Vec<_> = config.remotes.iter().collect();
+            remotes.sort_by(|a, b| a.0.cmp(b.0));
+            for (name, remote) in remotes {
+                println!("  {} \t{}", name, remote.url);
             }
         }
 
@@ -102,27 +100,15 @@ impl RemoteCommand {
             return Ok(());
         }
 
-        let remotes_path = dir.join("remotes");
-        if !remotes_path.exists() {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                format!("Remote '{}' not found.", name)
-            ));
-        }
+        let mut config = RemoteConfig::load_from_repository(&current_dir)?;
 
-        let data = fs::read(&remotes_path)?;
-        let mut remotes: std::collections::HashMap<String, String> = bincode::deserialize(&data)
-            .map_err(|e| Error::new(ErrorKind::InvalidData, e.to_string()))?;
-
-        if remotes.remove(&name).is_some() {
-            let encoded = bincode::serialize(&remotes)
-                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-            fs::write(&remotes_path, encoded)?;
+        if config.remotes.remove(&name).is_some() {
+            config.save_to_repository(&current_dir)?;
             println!("Remote '{}' removed successfully.", name);
         } else {
             return Err(Error::new(
                 ErrorKind::NotFound,
-                format!("Remote '{}' does not exist.", name)
+                format!("Remote '{}' does not exist.", name),
             ));
         }
 

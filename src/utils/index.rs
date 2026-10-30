@@ -1,13 +1,12 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::path::Path;
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
+use std::path::Path;
 
 pub struct IndexUtils;
 
 impl IndexUtils {
-
     pub fn read_index(dir: &Path) -> io::Result<HashMap<String, String>> {
         let index_path = dir.join("index");
         if !index_path.exists() {

@@ -1,14 +1,10 @@
-
-
 use crate::config;
 use std::collections::HashMap;
 
 pub struct ResetCommand;
 
 impl ResetCommand {
-
     pub fn execute(path: String) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);

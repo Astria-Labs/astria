@@ -1,6 +1,6 @@
-use std::path::Path;
-use serde::{Serialize, Deserialize};
 use crate::objects::object_type::ObjectType;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Astria {
@@ -9,11 +9,10 @@ pub struct Astria {
 }
 
 impl Astria {
-
     pub fn save(&self, dir: &Path) -> Result<String, Box<dyn std::error::Error>> {
         let serialized = bincode::serialize(self).unwrap();
         let compressed = zstd::encode_all(&serialized[..], 3)?;
-        
+
         let hash = blake3::hash(&compressed).to_hex().to_string();
 
         let objects_dir = dir.join("objects");

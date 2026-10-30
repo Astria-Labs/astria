@@ -1,17 +1,12 @@
-use std::path::Path;
-use std::collections::HashMap;
 use crate::storage::scan_workspace_and_build_tree;
+use std::collections::HashMap;
+use std::path::Path;
 
-use crate::objects::{
-    commit::commit::Commit, 
-    astria::astria::Astria,
-    tree::tree::Tree
-};
+use crate::objects::{astria::astria::Astria, commit::commit::Commit, tree::tree::Tree};
 
 pub struct CommitUtils;
 
 impl CommitUtils {
-
     /// Helper to resolve HEAD (supports direct commit hashes or symbolic refs like 'ref: refs/heads/main')
     pub fn get_head_commit_hash(dir: &Path) -> std::io::Result<Option<String>> {
         let head_path = dir.join("HEAD");
@@ -28,7 +23,11 @@ impl CommitUtils {
             let ref_file = dir.join(ref_path_str);
             if ref_file.exists() {
                 let hash = std::fs::read_to_string(&ref_file)?.trim().to_string();
-                if hash.is_empty() { Ok(None) } else { Ok(Some(hash)) }
+                if hash.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(hash))
+                }
             } else {
                 Ok(None)
             }
@@ -84,7 +83,7 @@ impl CommitUtils {
             Ok(s) => s,
             Err(_) => return Ok(files),
         };
-        
+
         let tree_main_object: Astria = match bincode::deserialize(&tree_serialized) {
             Ok(v) => v,
             Err(_) => return Ok(files),
@@ -101,8 +100,12 @@ impl CommitUtils {
                 if blob_path.exists() {
                     if let Ok(blob_compressed) = std::fs::read(&blob_path) {
                         if let Ok(blob_serialized) = zstd::decode_all(&blob_compressed[..]) {
-                            if let Ok(blob_main_object) = bincode::deserialize::<Astria>(&blob_serialized) {
-                                if let Ok(raw_bytes) = bincode::deserialize::<Vec<u8>>(&blob_main_object.data) {
+                            if let Ok(blob_main_object) =
+                                bincode::deserialize::<Astria>(&blob_serialized)
+                            {
+                                if let Ok(raw_bytes) =
+                                    bincode::deserialize::<Vec<u8>>(&blob_main_object.data)
+                                {
                                     if let Ok(text) = String::from_utf8(raw_bytes) {
                                         files.insert(entry.name, text);
                                     }
@@ -138,7 +141,11 @@ impl CommitUtils {
     }
 
     /// Helper to collect branches name recursively
-    pub fn collect_branch_names(base_dir: &std::path::Path, current_dir: &std::path::Path, list: &mut Vec<String>) -> std::io::Result<()> {
+    pub fn collect_branch_names(
+        base_dir: &std::path::Path,
+        current_dir: &std::path::Path,
+        list: &mut Vec<String>,
+    ) -> std::io::Result<()> {
         if current_dir.is_dir() {
             for entry in std::fs::read_dir(current_dir)? {
                 let entry = entry?;
@@ -162,7 +169,10 @@ impl CommitUtils {
         if !obj_path.exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("Integrity error: Referenced object {} not found in CAS.", hash),
+                format!(
+                    "Integrity error: Referenced object {} not found in CAS.",
+                    hash
+                ),
             ));
         }
         Ok(())

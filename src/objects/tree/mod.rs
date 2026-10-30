@@ -1,2 +1,2 @@
-pub mod tree_entry;
 pub mod tree;
+pub mod tree_entry;

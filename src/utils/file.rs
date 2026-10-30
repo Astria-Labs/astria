@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 pub struct FileUtils;
 
 impl FileUtils {
-
-    pub fn collect_files_recursively(dir: &Path, project_root: &Path, collected: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    pub fn collect_files_recursively(
+        dir: &Path,
+        project_root: &Path,
+        collected: &mut Vec<PathBuf>,
+    ) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();

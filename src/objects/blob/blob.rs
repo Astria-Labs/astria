@@ -1,6 +1,6 @@
-use std::path::Path;
 use crate::objects::astria::astria::Astria;
 use crate::objects::object_type::ObjectType;
+use std::path::Path;
 
 pub struct Blob {
     pub content: Vec<u8>,

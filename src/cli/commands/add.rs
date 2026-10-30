@@ -5,9 +5,7 @@ use crate::utils::index::IndexUtils;
 pub struct AddCommand;
 
 impl AddCommand {
-
     pub fn execute(paths: Vec<String>) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
@@ -38,7 +36,11 @@ impl AddCommand {
             }
 
             if target_path.is_dir() {
-                FileUtils::collect_files_recursively(&target_path, project_root, &mut files_to_process)?;
+                FileUtils::collect_files_recursively(
+                    &target_path,
+                    project_root,
+                    &mut files_to_process,
+                )?;
             } else if target_path.is_file() {
                 if let Ok(rel_path) = target_path.strip_prefix(project_root) {
                     files_to_process.push(rel_path.to_path_buf());
@@ -50,13 +52,13 @@ impl AddCommand {
             .iter()
             .filter_map(|file_rel_path| {
                 let file_abs_path = project_root.join(file_rel_path);
-                
+
                 if !file_abs_path.is_file() {
                     return None;
                 }
 
                 let rel_path_str = file_rel_path.to_string_lossy().replace('\\', "/");
-                
+
                 Some((rel_path_str, "staged".to_string()))
             })
             .collect();
@@ -74,8 +76,7 @@ impl AddCommand {
         } else {
             println!("No valid files added.");
         }
-    
+
         Ok(())
-    
     }
 }

@@ -1,14 +1,14 @@
+use arrow_array::types::Float32Type;
+use arrow_array::{Array, FixedSizeListArray, Float32Array, Int32Array, RecordBatch, StringArray};
+use arrow_schema::{DataType, Field, Schema};
+use async_trait::async_trait;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use futures::TryStreamExt;
 use lancedb::connect;
 use lancedb::connection::Connection;
-use lancedb::query::{QueryBase, ExecutableQuery};
+use lancedb::query::{ExecutableQuery, QueryBase};
 use lancedb::DistanceType;
-use fastembed::{TextEmbedding, InitOptions, EmbeddingModel};
-use arrow_array::{RecordBatch, StringArray, Int32Array, Float32Array, FixedSizeListArray, Array};
-use arrow_array::types::Float32Type;
-use arrow_schema::{DataType, Field, Schema};
-use futures::TryStreamExt;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 use crate::parser::CodeChunk;
 
@@ -30,14 +30,13 @@ impl VectorStore {
 
         // Initializes the embeddings local model
         let model = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2)
-                .with_show_download_progress(true)
+            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true),
         )?;
 
-        Ok(Self { 
-            db, 
-            db_path: db_path.to_string(), 
-            model 
+        Ok(Self {
+            db,
+            db_path: db_path.to_string(),
+            model,
         })
     }
 }
@@ -65,9 +64,12 @@ impl SemanticIndexer for VectorStore {
         let mut end_lines = Vec::new();
 
         for chunk in chunks {
-            let combined_text = format!("{} {} in {}: {}", chunk.kind, chunk.name, chunk.file, chunk.content);
+            let combined_text = format!(
+                "{} {} in {}: {}",
+                chunk.kind, chunk.name, chunk.file, chunk.content
+            );
             texts_to_embed.push(combined_text);
-            
+
             files.push(chunk.file.clone());
             names.push(chunk.name.clone());
             kinds.push(chunk.kind.clone());
@@ -90,10 +92,11 @@ impl SemanticIndexer for VectorStore {
             Field::new("kind", DataType::Utf8, false),
             Field::new("start_line", DataType::Int32, false),
             Field::new("end_line", DataType::Int32, false),
-            Field::new("vector", DataType::FixedSizeList(
-                Arc::new(Field::new("item", DataType::Float32, true)),
-                dim
-            ), false),
+            Field::new(
+                "vector",
+                DataType::FixedSizeList(Arc::new(Field::new("item", DataType::Float32, true)), dim),
+                false,
+            ),
         ]));
 
         let file_array = Arc::new(StringArray::from(files)) as Arc<dyn Array>;
@@ -107,14 +110,20 @@ impl SemanticIndexer for VectorStore {
             .map(|vec| Some(vec.into_iter().map(Some).collect()))
             .collect();
 
-        let vector_array = Arc::new(FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-            vector_data,
-            dim
-        )) as Arc<dyn Array>;
+        let vector_array = Arc::new(
+            FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(vector_data, dim),
+        ) as Arc<dyn Array>;
 
         let batch = RecordBatch::try_new(
             schema.clone(),
-            vec![file_array, name_array, kind_array, start_array, end_array, vector_array],
+            vec![
+                file_array,
+                name_array,
+                kind_array,
+                start_array,
+                end_array,
+                vector_array,
+            ],
         )?;
 
         let table_name = "code_index";
@@ -130,7 +139,10 @@ impl SemanticIndexer for VectorStore {
                 .await?;
         }
 
-        println!("Successfully indexed {} semantic chunks with local embeddings into LanceDB.", chunks.len());
+        println!(
+            "Successfully indexed {} semantic chunks with local embeddings into LanceDB.",
+            chunks.len()
+        );
         Ok(())
     }
 
@@ -205,7 +217,7 @@ impl SemanticIndexer for VectorStore {
             for i in 0..batch.num_rows() {
                 found_count += 1;
                 let distance = distances.map(|d| d.value(i)).unwrap_or(0.0);
-                
+
                 println!(
                     "  🎯 [Score/Dist: {:.4}] File: {} | [{}] '{}' (Lines {}-{})",
                     distance,
@@ -219,7 +231,10 @@ impl SemanticIndexer for VectorStore {
         }
 
         if found_count == 0 {
-            println!("No semantically matching code blocks found for '{}'.", query_term);
+            println!(
+                "No semantically matching code blocks found for '{}'.",
+                query_term
+            );
         } else {
             println!("\nFound {} semantic match(es).", found_count);
         }

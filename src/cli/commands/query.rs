@@ -1,14 +1,13 @@
 use crate::config;
-use crate::vector;
-use std::collections::HashMap;
-use crate::vector::VectorStore;
 use crate::parser::SemanticParser;
 use crate::utils::commit::CommitUtils;
+use crate::vector;
+use crate::vector::VectorStore;
+use std::collections::HashMap;
 
 pub struct QueryCommand;
 
 impl QueryCommand {
-    
     pub async fn execute(
         search: Option<String>,
         func: bool,
@@ -19,11 +18,10 @@ impl QueryCommand {
         commit: Option<String>,
         ai: Option<String>,
     ) -> std::io::Result<()> {
-
         let current_dir = std::env::current_dir()?;
         let cfg = config::CONFIG_GLOBAL.get().unwrap();
         let dir = current_dir.join(&cfg.config_folder);
-        
+
         if !dir.exists() {
             println!("Error: Astria repository not initialized.");
             return Ok(());
@@ -35,18 +33,24 @@ impl QueryCommand {
             })?;
 
             let indexer: Box<dyn vector::SemanticIndexer> = Box::new(
-                VectorStore::new(db_path_str).await
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+                VectorStore::new(db_path_str)
+                    .await
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?,
             );
-            indexer.search(ai_query).await
+            indexer
+                .search(ai_query)
+                .await
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
             return Ok(());
         }
-    
+
         let files: HashMap<String, String> = match commit {
             Some(ref commit_hash) => {
-                println!("🔎 Querying AST on commit {}...", &commit_hash[..7.min(commit_hash.len())]);
+                println!(
+                    "🔎 Querying AST on commit {}...",
+                    &commit_hash[..7.min(commit_hash.len())]
+                );
                 CommitUtils::load_commit_rust_files(&dir, commit_hash)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
             }
@@ -104,10 +108,7 @@ impl QueryCommand {
                 let vis_label = if sym.is_public { "[PUB]" } else { "[PRIV]" };
                 println!(
                     "    {} {:<10} {} (line {})",
-                    vis_label,
-                    sym.symbol_type,
-                    sym.name,
-                    sym.line_number
+                    vis_label, sym.symbol_type, sym.name, sym.line_number
                 );
 
                 matches_count += 1;
@@ -119,8 +120,7 @@ impl QueryCommand {
         } else {
             println!("\nTotal matching symbols found: {}", matches_count);
         }
-        
+
         Ok(())
     }
 }
-
