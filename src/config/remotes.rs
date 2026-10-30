@@ -50,7 +50,9 @@ impl RemoteConfig {
 
         let bytes = fs::read(&remotes_path)?;
         if let Ok(content) = String::from_utf8(bytes.clone()) {
-            return Ok(Self::parse(&content));
+            if bytes.is_empty() || Self::looks_like_text_config(&content) {
+                return Ok(Self::parse(&content));
+            }
         }
 
         let legacy: HashMap<String, String> = bincode::deserialize(&bytes)
@@ -67,7 +69,16 @@ impl RemoteConfig {
                 },
             );
         }
+        config.save_to_repository(repo_path)?;
         Ok(config)
+    }
+
+    fn looks_like_text_config(content: &str) -> bool {
+        content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .any(|line| line.starts_with("[remote "))
     }
 
     pub fn save_to_repository(&self, repo_path: &Path) -> Result<()> {

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Error, ErrorKind, Result};
 use std::path::{Path, PathBuf};
@@ -8,7 +7,6 @@ pub struct User;
 #[derive(Default, Debug, Clone)]
 pub struct ClientConfig {
     pub user: Option<UserSection>,
-    pub remotes: HashMap<String, RemoteSection>,
     pub checkout: Option<CheckoutSection>,
 }
 
@@ -17,13 +15,6 @@ pub struct UserSection {
     pub name: Option<String>,
     pub email: Option<String>,
     pub token: Option<String>,
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct RemoteSection {
-    pub url: String,
-    pub repository: String,
-    pub auth_token: String,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -69,25 +60,6 @@ impl User {
             let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
             match key {
                 "mode" => checkout.mode = Some(value.to_string()),
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidInput,
-                        format!("Chave desconhecida: {}", key),
-                    ))
-                }
-            }
-        } else if parts.len() == 3 && parts[0] == "remote" {
-            let remote_name = parts[1];
-            let key = parts[2];
-            let remote = config
-                .remotes
-                .entry(remote_name.to_string())
-                .or_insert_with(RemoteSection::default);
-
-            match key {
-                "url" => remote.url = value.to_string(),
-                "repository" => remote.repository = value.to_string(),
-                "auth_token" | "token" => remote.auth_token = value.to_string(),
                 _ => {
                     return Err(Error::new(
                         ErrorKind::InvalidInput,
@@ -179,24 +151,6 @@ impl ClientConfig {
         ["[user]", "    name = \"\"", "    email = \"\"", ""].join("\n")
     }
 
-    pub fn with_origin(url: String, repository: String, auth_token: String) -> Self {
-        let mut remotes = HashMap::new();
-        remotes.insert(
-            "origin".to_string(),
-            RemoteSection {
-                url,
-                repository,
-                auth_token,
-            },
-        );
-
-        Self {
-            user: Some(UserSection::default()),
-            remotes,
-            checkout: None,
-        }
-    }
-
     pub fn load_from_repository(repo_path: &Path) -> Result<Self> {
         let cfg = crate::config::get();
         let config_path = repo_path.join(&cfg.config_folder).join("config");
@@ -240,7 +194,6 @@ impl ClientConfig {
         enum Section {
             None,
             User,
-            Remote(String),
             Checkout,
         }
 
@@ -259,12 +212,6 @@ impl ClientConfig {
                     section = Section::User;
                 } else if header == "checkout" {
                     section = Section::Checkout;
-                } else if let Some(remote_name) = Self::parse_remote_header(header) {
-                    config
-                        .remotes
-                        .entry(remote_name.clone())
-                        .or_insert_with(RemoteSection::default);
-                    section = Section::Remote(remote_name);
                 } else {
                     section = Section::None;
                 }
@@ -288,18 +235,6 @@ impl ClientConfig {
                         _ => {}
                     }
                 }
-                Section::Remote(name) => {
-                    let remote = config
-                        .remotes
-                        .entry(name.clone())
-                        .or_insert_with(RemoteSection::default);
-                    match key {
-                        "url" => remote.url = value,
-                        "repository" => remote.repository = value,
-                        "auth_token" | "token" => remote.auth_token = value,
-                        _ => {}
-                    }
-                }
                 Section::Checkout => {
                     let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
                     if key == "mode" {
@@ -311,16 +246,6 @@ impl ClientConfig {
         }
 
         Ok(config)
-    }
-
-    fn parse_remote_header(header: &str) -> Option<String> {
-        let rest = header.strip_prefix("remote ")?;
-        let name = rest.trim().strip_prefix('"')?.strip_suffix('"')?;
-        if name.is_empty() {
-            None
-        } else {
-            Some(name.to_string())
-        }
     }
 
     fn unquote(value: &str) -> String {
@@ -360,15 +285,6 @@ impl ClientConfig {
         out
     }
 
-    pub fn get_remote(&self, remote_name: &str) -> Result<&RemoteSection> {
-        self.remotes.get(remote_name).ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                format!("Remote '{}' not found.", remote_name),
-            )
-        })
-    }
-
     pub fn client_id(&self) -> String {
         self.user
             .as_ref()
@@ -390,32 +306,5 @@ impl ClientConfig {
         let checkout = config.checkout.get_or_insert_with(CheckoutSection::default);
         checkout.mode = Some(mode.to_string());
         config.save_to_repository(repo_path)
-    }
-
-    /// Valida e extrai o repositório e o token para conexões QUIC.
-    pub fn get_auth_data(&self) -> Result<(String, String)> {
-        self.get_auth_data_for_remote("origin")
-    }
-
-    pub fn get_auth_data_for_remote(&self, remote_name: &str) -> Result<(String, String)> {
-        let remote = self.get_remote(remote_name)?;
-        let repository = remote.repository.clone();
-        if repository.trim().is_empty() {
-            return Err(Error::new(ErrorKind::NotFound, format!("Field 'repository' is missing or empty in .astria/config under [remote \"{}\"]", remote_name)));
-        }
-
-        let token = if !remote.auth_token.trim().is_empty() {
-            remote.auth_token.clone()
-        } else {
-            self.user
-                .as_ref()
-                .and_then(|u| u.token.clone())
-                .filter(|t| !t.trim().is_empty())
-                .ok_or_else(|| {
-                    Error::new(ErrorKind::NotFound, format!("Field 'auth_token' is missing or empty in .astria/config under [remote \"{}\"]", remote_name))
-                })?
-        };
-
-        Ok((repository, token))
     }
 }
